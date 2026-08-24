@@ -20,7 +20,7 @@ export default async function NewSalePage() {
     <div className="space-y-4">
       <h1 className="text-xl font-bold">卖出出库</h1>
       <SaleForm
-        defaultHandler={user?.name ?? '刚'}
+        defaultHandler={user?.name ?? 'admin'}
         customers={customers}
         warehouses={warehouses.map((w) => ({ id: w.id, name: w.name, type: w.type }))}
         inventoryRows={inventory.map((r) => ({

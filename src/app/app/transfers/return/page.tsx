@@ -23,7 +23,7 @@ export default async function ProcessingReturnPage() {
     <div className="space-y-4">
       <h1 className="text-xl font-bold">加工收回</h1>
       <ProcessingReturnForm
-        defaultHandler={user?.name ?? '刚'}
+        defaultHandler={user?.name ?? 'admin'}
         factories={factories}
         warehouses={warehouses}
         factoryRows={inventory

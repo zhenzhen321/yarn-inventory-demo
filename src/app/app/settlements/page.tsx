@@ -83,7 +83,7 @@ export default async function SettlementsPage({
     <div className="space-y-6">
       <h1 className="text-xl font-bold">资金结算</h1>
       <SettleForm
-        defaultHandler={user?.name ?? '刚'}
+        defaultHandler={user?.name ?? 'admin'}
         suppliers={suppliers}
         customers={customers}
         factories={factories}

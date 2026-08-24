@@ -16,7 +16,7 @@ export default async function NewTransferPage() {
     <div className="space-y-4">
       <h1 className="text-xl font-bold">仓库调拨</h1>
       <TransferForm
-        defaultHandler={user?.name ?? '刚'}
+        defaultHandler={user?.name ?? 'admin'}
         warehouses={warehouses}
         destinations={warehouses}
         inventoryRows={inventory.map((r) => ({

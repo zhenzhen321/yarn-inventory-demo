@@ -134,9 +134,9 @@ export function TransferForm({
         </label>
         <label className="text-sm">
           经办人
-          <Select name="handlerName" defaultValue={defaultHandler ?? '刚'} required>
-            <option value="刚">刚</option>
-            <option value="萍">萍</option>
+          <Select name="handlerName" defaultValue={defaultHandler ?? 'admin'} required>
+            <option value="admin">admin</option>
+            <option value="clerk">clerk</option>
           </Select>
         </label>
       </div>

@@ -24,7 +24,7 @@ export default async function NewStocktakePage() {
     <div className="space-y-4">
       <h1 className="text-xl font-bold">盘库</h1>
       <StocktakeForm
-        defaultHandler={user?.name ?? '刚'}
+        defaultHandler={user?.name ?? 'admin'}
         warehouses={warehouses}
         inventoryRows={inventory.map((r) => ({
           id: r.id,
