@@ -23,7 +23,7 @@ describe('校验', () => {
   })
 
   it('入库单至少一条明细，重量必须大于 0', () => {
-    const base = { date: '2026-08-01', supplierId: 's1', warehouseId: 'w1', handlerName: '刚' }
+    const base = { date: '2026-08-01', supplierId: 's1', warehouseId: 'w1', handlerName: 'admin' }
     expect(purchaseSchema.safeParse({ ...base, items: [] }).success).toBe(false)
     expect(
       purchaseSchema.safeParse({ ...base, items: [{ variantId: 'v1', weight: 0, price: 20 }] }).success,
@@ -54,7 +54,7 @@ describe('校验', () => {
 
 describe('第二批校验', () => {
   it('卖出单至少一条明细且重量大于 0', () => {
-    const base = { date: '2026-08-11', customerId: 'c1', warehouseId: 'w1', handlerName: '刚' }
+    const base = { date: '2026-08-11', customerId: 'c1', warehouseId: 'w1', handlerName: 'admin' }
     expect(saleSchema.safeParse({ ...base, items: [] }).success).toBe(false)
     expect(
       saleSchema.safeParse({
@@ -76,7 +76,7 @@ describe('第二批校验', () => {
         date: '2026-08-11',
         fromWarehouseId: '',
         toWarehouseId: 'w2',
-        handlerName: '刚',
+        handlerName: 'admin',
         items: [{ inventoryId: 'i1', weight: 10 }],
       }).success,
     ).toBe(false)
@@ -87,7 +87,7 @@ describe('第二批校验', () => {
       stocktakeSchema.safeParse({
         date: '2026-08-11',
         warehouseId: 'w1',
-        handlerName: '萍',
+        handlerName: 'clerk',
         items: [{ inventoryId: 'i1', actualWeight: -1 }],
       }).success,
     ).toBe(false)
@@ -100,7 +100,7 @@ describe('第二批校验', () => {
         counterpartyId: 'c1',
         amount: 100,
         date: '2026-08-11',
-        handlerName: '刚',
+        handlerName: 'admin',
       }).success,
     ).toBe(false)
     expect(
@@ -109,7 +109,7 @@ describe('第二批校验', () => {
         counterpartyId: 'c1',
         amount: 0,
         date: '2026-08-11',
-        handlerName: '刚',
+        handlerName: 'admin',
       }).success,
     ).toBe(false)
   })
@@ -154,7 +154,7 @@ describe('加工收回校验', () => {
       date: '2026-08-13',
       factoryId: 'f1',
       warehouseId: 'w1',
-      handlerName: '刚',
+      handlerName: 'admin',
       items: [
         {
           inventoryId: 'i1',
@@ -195,7 +195,7 @@ describe('运费与加工厂校验', () => {
         date: '2026-08-11',
         supplierId: 's1',
         warehouseId: 'w1',
-        handlerName: '刚',
+        handlerName: 'admin',
         items: [{ variantId: 'v1', weight: 10, price: 20 }],
         freight: -1,
       }).success,
@@ -205,7 +205,7 @@ describe('运费与加工厂校验', () => {
         date: '2026-08-11',
         customerId: 'c1',
         warehouseId: 'w1',
-        handlerName: '刚',
+        handlerName: 'admin',
         items: [{ inventoryId: 'i1', weight: 10, price: 20 }],
         freight: 300,
       }).success,
@@ -220,7 +220,7 @@ describe('运费与加工厂校验', () => {
         date: '2026-08-11',
         fromWarehouseId: 'w1',
         toWarehouseId: 'f1',
-        handlerName: '刚',
+        handlerName: 'admin',
         items: [{ inventoryId: 'i1', weight: 10 }],
         processingFeePerKg: -1,
       }).success,
@@ -230,9 +230,9 @@ describe('运费与加工厂校验', () => {
 
 describe('登录校验', () => {
   it('remember 默认为 true', () => {
-    expect(loginSchema.safeParse({ username: '刚', password: 'x' }).data?.remember).toBe(true)
+    expect(loginSchema.safeParse({ username: 'admin', password: 'x' }).data?.remember).toBe(true)
     expect(
-      loginSchema.safeParse({ username: '刚', password: 'x', remember: false }).data?.remember,
+      loginSchema.safeParse({ username: 'admin', password: 'x', remember: false }).data?.remember,
     ).toBe(false)
   })
 })

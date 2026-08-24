@@ -30,7 +30,7 @@ async function setupFactory(weight = 400) {
     date: new Date('2026-08-01'),
     supplierId: base.supplierId,
     warehouseId: base.warehouseA,
-    handlerName: '刚',
+    handlerName: 'admin',
     items: [{ variantId: base.variantId, batchNo: 'G-1', weight: 1000, price: 20 }],
   })
   let rows = await getInventoryRows(db, { warehouseId: base.warehouseA })
@@ -38,7 +38,7 @@ async function setupFactory(weight = 400) {
     date: new Date('2026-08-02'),
     fromWarehouseId: base.warehouseA,
     toWarehouseId: factory.id,
-    handlerName: '刚',
+    handlerName: 'admin',
     freight: 80,
     items: [{ inventoryId: rows[0].id, weight }],
   })
@@ -52,7 +52,7 @@ describe('加工厂欠款汇总', () => {
     await settleProcessingFee(db, s.factoryRow.id, {
       feePerKg: 2,
       inputWeight: 100,
-      handlerName: '刚',
+      handlerName: 'admin',
     })
     let sum = await getFactoryFeeSummary(db)
     let f = sum.find((x) => x.id === s.factoryId)!
@@ -65,7 +65,7 @@ describe('加工厂欠款汇总', () => {
     await settleProcessingFee(db, s.factoryRow.id, {
       feePerKg: 3,
       inputWeight: 150,
-      handlerName: '刚',
+      handlerName: 'admin',
     })
     sum = await getFactoryFeeSummary(db)
     f = sum.find((x) => x.id === s.factoryId)!
@@ -81,14 +81,14 @@ describe('加工费付款', () => {
     await settleProcessingFee(db, s.factoryRow.id, {
       feePerKg: 2,
       inputWeight: 100,
-      handlerName: '刚',
+      handlerName: 'admin',
     })
     const pay = await createFactoryFeePayment(db, {
       factoryId: s.factoryId,
       amount: 150,
       date: new Date('2026-08-10'),
       method: '微信',
-      handlerName: '萍',
+      handlerName: 'clerk',
     })
     expect(pay.amount.toString()).toBe('150')
     const f = (await getFactoryFeeSummary(db)).find((x) => x.id === s.factoryId)!
@@ -98,7 +98,7 @@ describe('加工费付款', () => {
     const records = await getFactoryFeePayments(db)
     expect(records).toHaveLength(1)
     expect(records[0].factoryName).toBe('染厂')
-    expect(records[0].handlerName).toBe('萍')
+    expect(records[0].handlerName).toBe('clerk')
   })
 
   it('超付拦截；非加工厂拦截', async () => {
@@ -106,14 +106,14 @@ describe('加工费付款', () => {
     await settleProcessingFee(db, s.factoryRow.id, {
       feePerKg: 2,
       inputWeight: 100,
-      handlerName: '刚',
+      handlerName: 'admin',
     })
     await expect(
       createFactoryFeePayment(db, {
         factoryId: s.factoryId,
         amount: 201,
         date: new Date('2026-08-10'),
-        handlerName: '刚',
+        handlerName: 'admin',
       }),
     ).rejects.toThrow('超过未结金额')
     await expect(
@@ -121,7 +121,7 @@ describe('加工费付款', () => {
         factoryId: s.warehouseA,
         amount: 10,
         date: new Date('2026-08-10'),
-        handlerName: '刚',
+        handlerName: 'admin',
       }),
     ).rejects.toThrow('加工厂不存在')
   })
@@ -131,13 +131,13 @@ describe('加工费付款', () => {
     await settleProcessingFee(db, s.factoryRow.id, {
       feePerKg: 2,
       inputWeight: 100,
-      handlerName: '刚',
+      handlerName: 'admin',
     })
     const pay = await createFactoryFeePayment(db, {
       factoryId: s.factoryId,
       amount: 100,
       date: new Date('2026-08-10'),
-      handlerName: '刚',
+      handlerName: 'admin',
     })
     const deleted = await revertFactoryFeePayment(db, pay.id)
     expect(deleted.id).toBe(pay.id)
@@ -153,13 +153,13 @@ describe('加工厂对账单', () => {
     await settleProcessingFee(db, s.factoryRow.id, {
       feePerKg: 2,
       inputWeight: 100,
-      handlerName: '刚',
+      handlerName: 'admin',
     })
     await createFactoryFeePayment(db, {
       factoryId: s.factoryId,
       amount: 50,
       date: new Date('2026-08-10'),
-      handlerName: '萍',
+      handlerName: 'clerk',
     })
     const rows = await getFactoryStatement(db, s.factoryId)
     expect(rows).toHaveLength(2)

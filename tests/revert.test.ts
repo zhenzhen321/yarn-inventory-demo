@@ -20,7 +20,7 @@ describe('撤回结算', () => {
       date: new Date('2026-08-01'),
       supplierId: base.supplierId,
       warehouseId: base.warehouseA,
-      handlerName: '刚',
+      handlerName: 'admin',
       items: [{ variantId: base.variantId, batchNo: 'G-1', weight: 1000, price: 20 }],
     })
     const s = await createSettlement(db, {
@@ -28,7 +28,7 @@ describe('撤回结算', () => {
       counterpartyId: base.supplierId,
       amount: 5000,
       date: new Date('2026-08-08'),
-      handlerName: '刚',
+      handlerName: 'admin',
     })
     await revertSettlement(db, s.id)
     const payables = await getPayableSummary(db)
@@ -48,7 +48,7 @@ describe('撤回买入', () => {
       date: new Date('2026-08-01'),
       supplierId: base.supplierId,
       warehouseId: base.warehouseA,
-      handlerName: '刚',
+      handlerName: 'admin',
       freight: 100,
       items: [
         { variantId: base.variantId, batchNo: 'F1', weight: 300, price: 10 },
@@ -72,7 +72,7 @@ describe('撤回买入', () => {
       date: new Date('2026-08-01'),
       supplierId: base.supplierId,
       warehouseId: base.warehouseA,
-      handlerName: '刚',
+      handlerName: 'admin',
       items: [{ variantId: base.variantId, batchNo: 'G-1', weight: 1000, price: 20 }],
     })
     const rows = await getInventoryRows(db, { warehouseId: base.warehouseA })
@@ -80,7 +80,7 @@ describe('撤回买入', () => {
       date: new Date('2026-08-02'),
       customerId: base.customerId,
       warehouseId: base.warehouseA,
-      handlerName: '刚',
+      handlerName: 'admin',
       items: [{ inventoryId: rows[0].id, weight: 100, price: 22 }],
     })
     await expect(revertPurchase(db, order.id)).rejects.toThrow('已被卖出/调走')
@@ -92,7 +92,7 @@ describe('撤回买入', () => {
       date: new Date('2026-08-01'),
       supplierId: base.supplierId,
       warehouseId: base.warehouseA,
-      handlerName: '刚',
+      handlerName: 'admin',
       items: [{ variantId: base.variantId, batchNo: 'G-1', weight: 500, price: 20 }],
     })
     await createSettlement(db, {
@@ -100,7 +100,7 @@ describe('撤回买入', () => {
       counterpartyId: base.supplierId,
       amount: 8000,
       date: new Date('2026-08-03'),
-      handlerName: '刚',
+      handlerName: 'admin',
     })
     await expect(revertPurchase(db, order.id)).rejects.toThrow('已付超过应付')
   })
@@ -113,7 +113,7 @@ describe('撤回卖出', () => {
       date: new Date('2026-08-01'),
       supplierId: base.supplierId,
       warehouseId: base.warehouseA,
-      handlerName: '刚',
+      handlerName: 'admin',
       items: [{ variantId: base.variantId, batchNo: 'G-1', weight: 1000, price: 20 }],
     })
     let rows = await getInventoryRows(db, { warehouseId: base.warehouseA })
@@ -121,7 +121,7 @@ describe('撤回卖出', () => {
       date: new Date('2026-08-02'),
       customerId: base.customerId,
       warehouseId: base.warehouseA,
-      handlerName: '刚',
+      handlerName: 'admin',
       items: [{ inventoryId: rows[0].id, weight: 100, price: 22 }],
     })
     await revertSale(db, sale.id)
@@ -137,7 +137,7 @@ describe('撤回卖出', () => {
       date: new Date('2026-08-01'),
       supplierId: base.supplierId,
       warehouseId: base.warehouseA,
-      handlerName: '刚',
+      handlerName: 'admin',
       items: [{ variantId: base.variantId, batchNo: 'G-1', weight: 1000, price: 20 }],
     })
     const rows = await getInventoryRows(db, { warehouseId: base.warehouseA })
@@ -145,7 +145,7 @@ describe('撤回卖出', () => {
       date: new Date('2026-08-02'),
       customerId: base.customerId,
       warehouseId: base.warehouseA,
-      handlerName: '刚',
+      handlerName: 'admin',
       items: [{ inventoryId: rows[0].id, weight: 100, price: 22 }],
     })
     await createSettlement(db, {
@@ -153,7 +153,7 @@ describe('撤回卖出', () => {
       counterpartyId: base.customerId,
       amount: 2200,
       date: new Date('2026-08-03'),
-      handlerName: '刚',
+      handlerName: 'admin',
     })
     await expect(revertSale(db, sale.id)).rejects.toThrow('已收超过应收')
   })

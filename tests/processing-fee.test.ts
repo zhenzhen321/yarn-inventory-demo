@@ -25,7 +25,7 @@ async function setupFactory(weight = 100) {
     date: new Date('2026-08-01'),
     supplierId: base.supplierId,
     warehouseId: base.warehouseA,
-    handlerName: '刚',
+    handlerName: 'admin',
     items: [{ variantId: base.variantId, batchNo: 'G-1', weight: 1000, price: 20 }],
   })
   let rows = await getInventoryRows(db, { warehouseId: base.warehouseA })
@@ -33,7 +33,7 @@ async function setupFactory(weight = 100) {
     date: new Date('2026-08-02'),
     fromWarehouseId: base.warehouseA,
     toWarehouseId: factory.id,
-    handlerName: '刚',
+    handlerName: 'admin',
     freight: 80,
     items: [{ inventoryId: rows[0].id, weight }],
   })
@@ -66,7 +66,7 @@ describe('结算加工费', () => {
       date: new Date('2026-08-01'),
       supplierId: base.supplierId,
       warehouseId: base.warehouseA,
-      handlerName: '刚',
+      handlerName: 'admin',
       items: [{ variantId: base.variantId, batchNo: 'G-1', weight: 100, price: 20 }],
     })
     const rows = await getInventoryRows(db, { warehouseId: base.warehouseA })
@@ -131,7 +131,7 @@ describe('结算加工费', () => {
     const r = await settleProcessingFee(db, s.factoryRow.id, {
       feePerKg: 2,
       inputWeight: 100,
-      handlerName: '刚',
+      handlerName: 'admin',
     })
     expect(r.inputWeight.toString()).toBe('100')
     expect(r.remainingWeight.toString()).toBe('300')
@@ -161,7 +161,7 @@ describe('结算加工费', () => {
     expect(recs[0].feePerKg.toString()).toBe('2')
     expect(recs[0].feeTotal.toString()).toBe('200')
     expect(recs[0].remainingWeight.toString()).toBe('300')
-    expect(recs[0].handlerName).toBe('刚')
+    expect(recs[0].handlerName).toBe('admin')
   })
 
   it('部分结算 + 身份变化：原行保留剩余，新变体/批次已算行独立', async () => {
@@ -233,7 +233,7 @@ describe('只有已算加工费的货能出加工厂', () => {
         date: new Date('2026-08-03'),
         fromWarehouseId: s.factoryId,
         toWarehouseId: s.warehouseB,
-        handlerName: '刚',
+        handlerName: 'admin',
         items: [{ inventoryId: s.factoryRow.id, weight: 10 }],
       }),
     ).rejects.toThrow('未结算加工费')
@@ -242,7 +242,7 @@ describe('只有已算加工费的货能出加工厂', () => {
         date: new Date('2026-08-03'),
         customerId: s.customerId,
         warehouseId: s.factoryId,
-        handlerName: '刚',
+        handlerName: 'admin',
         items: [{ inventoryId: s.factoryRow.id, weight: 10, price: 25 }],
       }),
     ).rejects.toThrow('未结算加工费')
@@ -251,7 +251,7 @@ describe('只有已算加工费的货能出加工厂', () => {
         date: new Date('2026-08-03'),
         factoryId: s.factoryId,
         warehouseId: s.warehouseA,
-        handlerName: '刚',
+        handlerName: 'admin',
         items: [
           {
             inventoryId: s.factoryRow.id,
@@ -274,7 +274,7 @@ describe('只有已算加工费的货能出加工厂', () => {
         date: new Date('2026-08-04'),
         fromWarehouseId: s.factoryId,
         toWarehouseId: s.warehouseB,
-        handlerName: '刚',
+        handlerName: 'admin',
         items: [{ inventoryId: settledRow.id, weight: 10 }],
       }),
     ).resolves.toBeTruthy()

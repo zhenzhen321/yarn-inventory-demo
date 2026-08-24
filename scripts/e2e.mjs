@@ -632,7 +632,7 @@ const login2 = await req('/api/auth/login', {
   method: 'POST',
   body: { username: admin2Username, password: password2 },
 })
-check('萍登录成功', login2.status === 200)
+check('第二个账号登录成功', login2.status === 200)
 const cookie2 = login2.setCookie.split(';')[0]
 const forbidden = await req(`/api/settlements/${settleRow.id}`, { method: 'DELETE', cookie: cookie2 })
 check('非经办人撤回被拒(403)', forbidden.status === 403, forbidden.json?.error)

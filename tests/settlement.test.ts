@@ -191,7 +191,7 @@ describe('折让结算', () => {
       amount: 500,
       date: new Date('2026-08-09'),
       method: '折让',
-      handlerName: '萍',
+      handlerName: 'clerk',
     })
     await createSettlement(db, {
       side: 'SALE',
@@ -199,7 +199,7 @@ describe('折让结算', () => {
       amount: 1000,
       date: new Date('2026-08-10'),
       method: '微信',
-      handlerName: '刚',
+      handlerName: 'admin',
     })
 
     const receivables = await getReceivableSummary(db)
@@ -212,6 +212,6 @@ describe('折让结算', () => {
     expect(d?.total.toString()).toBe('500')
     expect(d?.records).toHaveLength(1)
     expect(d?.records[0].amount.toString()).toBe('500')
-    expect(d?.records[0].handlerName).toBe('萍')
+    expect(d?.records[0].handlerName).toBe('clerk')
   })
 })

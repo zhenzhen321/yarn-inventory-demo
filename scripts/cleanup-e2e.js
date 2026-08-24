@@ -1,4 +1,4 @@
-// 只清理 E2E 前缀的测试数据，保留真实业务数据（如兰裕仿貂等）
+// 只清理 E2E 前缀的测试数据，不触碰演示数据
 // 用法：node scripts/cleanup-e2e.js（在 yarn-ms 目录下执行）
 const { PrismaClient } = require('@prisma/client')
 const p = new PrismaClient()

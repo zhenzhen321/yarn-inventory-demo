@@ -95,7 +95,7 @@ async function main() {
     data: { name: '沪上织造有限公司', type: 'CUSTOMER', contact: '刘总', phone: '13800000002' },
   })
   const both = await prisma.counterparty.create({
-    data: { name: '义乌针织经销部', type: 'BOTH', contact: '赵老板', phone: '13800000003' },
+    data: { name: '义乌针织经销部', type: 'BOTH', contact: '赵经理', phone: '13800000003' },
   })
 
   const cotton = await prisma.yarn.create({ data: { name: '纯棉纱', note: '32支/40支现货' } })

@@ -1,6 +1,6 @@
-// 清空开发库全部业务数据，仅保留两个管理员账号（刚 / 萍）
+// 清空开发库全部业务数据，仅保留两个演示账号（admin / clerk）
 // 密码从 .env 的 ADMIN1_PASSWORD / ADMIN2_PASSWORD 读取（.env 不入库）
-// 用法：node scripts/reset-dev-db.js（在 yarn-ms 目录下执行）
+// 用法：node scripts/reset-dev-db.js（在项目根目录下执行）
 const { readFileSync } = require('node:fs')
 const { PrismaClient } = require('@prisma/client')
 const bcrypt = require('bcryptjs')
@@ -26,6 +26,8 @@ const p = new PrismaClient()
   await p.purchaseOrder.deleteMany()
   await p.settlement.deleteMany()
   await p.auditLog.deleteMany()
+  await p.processingFeePayment.deleteMany()
+  await p.processingFeeSettlement.deleteMany()
   await p.inventory.deleteMany()
   await p.batch.deleteMany()
   await p.yarnVariant.deleteMany()
@@ -36,14 +38,13 @@ const p = new PrismaClient()
 
   const admin1 = getEnv('ADMIN1_PASSWORD')
   const admin2 = getEnv('ADMIN2_PASSWORD')
-  if (!admin1 || !admin2) {
-    throw new Error('请先在 .env 中设置 ADMIN1_PASSWORD 与 ADMIN2_PASSWORD')
-  }
+  const a1 = admin1 || 'demo123456'
+  const a2 = admin2 || 'demo123456'
   await p.user.create({
-    data: { username: '刚', name: '刚', passwordHash: await bcrypt.hash(admin1, 10) },
+    data: { username: 'admin', name: 'admin', passwordHash: await bcrypt.hash(a1, 10) },
   })
   await p.user.create({
-    data: { username: '萍', name: '萍', passwordHash: await bcrypt.hash(admin2, 10) },
+    data: { username: 'clerk', name: 'clerk', passwordHash: await bcrypt.hash(a2, 10) },
   })
 
   const users = await p.user.findMany()
