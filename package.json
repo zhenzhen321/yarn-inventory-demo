@@ -1,0 +1,53 @@
+{
+  "name": "yarn-inventory-demo",
+  "private": true,
+  "version": "1.0.0",
+  "description": "纱线进销存管理系统演示版：买入/卖出/调拨/盘库/结算/报表，文档驱动的全栈项目",
+  "scripts": {
+    "dev": "next dev",
+    "build": "next build",
+    "start": "next start",
+    "start:home": "next start -H 0.0.0.0 -p 3000",
+    "test": "vitest run",
+    "e2e": "node scripts/e2e.mjs",
+    "backup": "node scripts/backup-db.js",
+    "migrate:dev": "npm run backup && prisma migrate dev",
+    "backup:master": "node scripts/backup-master-data.js",
+    "restore:master": "node scripts/restore-master-data.js",
+    "db:push": "npm run backup && prisma db push",
+    "db:seed": "prisma db seed"
+  },
+  "dependencies": {
+    "@prisma/client": "^5.22.0",
+    "bcryptjs": "^2.4.3",
+    "jose": "^5.9.6",
+    "next": "^14.2.21",
+    "react": "^18.3.1",
+    "react-dom": "^18.3.1",
+    "xlsx": "^0.18.5",
+    "zod": "^3.23.8"
+  },
+  "devDependencies": {
+    "@types/bcryptjs": "^2.4.6",
+    "@types/node": "^20.17.10",
+    "@types/react": "^18.3.12",
+    "@types/react-dom": "^18.3.1",
+    "autoprefixer": "^10.4.20",
+    "postcss": "^8.4.49",
+    "prisma": "^5.22.0",
+    "tailwindcss": "^3.4.15",
+    "tsx": "^4.19.2",
+    "typescript": "^5.6.3",
+    "vitest": "^1.6.0"
+  },
+  "prisma": {
+    "seed": "tsx prisma/seed.ts"
+  },
+  "allowScripts": {
+    "@prisma/client@5.22.0": true,
+    "@prisma/engines@5.22.0": true,
+    "esbuild@0.28.2": true,
+    "esbuild@0.21.5": true,
+    "prisma@5.22.0": true
+  }
+}

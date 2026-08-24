@@ -1,0 +1,13 @@
+node_modules/
+.next/
+.next-build/
+backups/
+.env
+*.db
+*.db-journal
+*.db-wal
+*.db-shm
+*.tsbuildinfo
+prisma/schema.test.prisma
+.server-*.log
+.prod-*.log
