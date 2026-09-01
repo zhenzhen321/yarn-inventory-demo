@@ -67,13 +67,47 @@ npm run dev
 
 仓库包含可直接替换域名的 Docker Compose 配置：Caddy 对外提供 HTTPS，Next.js 应用和 SQLite 数据库运行在服务器上，数据与备份通过命名卷持久化。
 
+### 1. 准备服务器与域名
+
+- Linux 服务器安装 Docker Engine 与 Docker Compose
+- 域名的 A/AAAA 记录指向服务器公网 IP
+- 防火墙或云安全组放行 TCP 80、TCP 443；需要 HTTP/3 时再放行 UDP 443
+
+### 2. 设置部署变量并启动
+
 ```bash
 cp .env.production.example .env.production
-# 编辑域名、会话密钥和演示账号密码
+# 编辑 .env.production，设置 DOMAIN、SESSION_SECRET、
+# ADMIN1_PASSWORD 和 ADMIN2_PASSWORD
 docker compose up -d --build
 ```
 
-完整的服务器准备、DNS、验证、备份和更新步骤见 [docs/06-部署演示.md](docs/06-部署演示.md)。这套配置用于展示远程部署能力，不要求连接你的真实项目或生产数据。
+首次启动会自动执行数据库迁移并创建演示数据；以后重启或重新构建容器不会清空数据库。DNS 和端口正确时，Caddy 会为域名配置 HTTPS。
+
+### 3. 验证远程访问
+
+```bash
+docker compose ps
+curl https://你的域名/api/health
+docker compose logs --tail=100 app
+docker compose logs --tail=100 caddy
+```
+
+健康检查应返回 `{"status":"ok"}`。随后用浏览器打开域名，使用 `.env.production` 中配置的演示账号密码登录。
+
+### 4. 日常操作
+
+```bash
+docker compose logs -f app                 # 查看应用日志
+docker compose exec app npm run backup     # 手动备份数据库
+docker compose pull                        # 拉取基础镜像更新
+docker compose up -d --build               # 更新并重新构建 Demo
+docker compose down                        # 停止服务，保留数据
+```
+
+> 不要提交 `.env.production`、数据库或备份。`docker compose down -v` 会删除演示数据卷，仅在明确需要彻底重置时使用。
+
+完整说明和正式上线前的边界评估见 [docs/06-部署演示.md](docs/06-部署演示.md)。这套配置用于展示远程部署能力，不要求连接你的真实项目或生产数据。
 
 ## 测试与验收
 
