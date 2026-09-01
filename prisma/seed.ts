@@ -12,8 +12,8 @@ import { createSettlement } from '../src/services/settlement'
 
 const prisma = new PrismaClient()
 
-const ADMIN_PASSWORD = 'demo123456'
-const CLERK_PASSWORD = 'demo123456'
+const ADMIN_PASSWORD = process.env.ADMIN1_PASSWORD || 'demo123456'
+const CLERK_PASSWORD = process.env.ADMIN2_PASSWORD || 'demo123456'
 
 function day(iso: string): Date {
   return new Date(`${iso}T09:00:00+08:00`)
@@ -300,7 +300,7 @@ async function main() {
   }
   console.log('演示数据生成完成：')
   console.log(JSON.stringify(summary, null, 2))
-  console.log('演示账号：admin / demo123456，clerk / demo123456')
+  console.log('演示账号已创建：admin、clerk（密码来自环境变量或本地演示默认值）')
   void s1
 }
 

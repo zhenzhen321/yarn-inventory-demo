@@ -17,7 +17,7 @@ export async function proxy(req: NextRequest) {
   }
 
   const { pathname } = req.nextUrl
-  if (pathname === '/api/auth/login') return NextResponse.next()
+  if (pathname === '/api/auth/login' || pathname === '/api/health') return NextResponse.next()
 
   const token = req.cookies.get(SESSION_COOKIE)?.value
   let ok = false

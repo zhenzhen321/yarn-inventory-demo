@@ -12,7 +12,8 @@
 - 资金结算：按往来单位汇总应收应付，支持未结/部分/已结、超结拦截、折让登记
 - 安全与留痕：bcrypt 密码、JWT 会话、登录限速、CSRF 校验、全量审计日志、单据撤回可追溯
 - 报表与导出：库存金额、毛利估算、客户/供应商订单查询、近 30 天流水，全部支持 Excel 导出
-- 工程质量：131 个单元测试（20 个测试文件）、自包含端到端验收脚本、GitHub Actions 持续集成、数据库备份/恢复脚本
+- 部署展示：Docker Compose 一键启动、Caddy 域名 HTTPS、健康检查、SQLite 与备份持久化
+- 工程质量：136 个单元测试（21 个测试文件）、自包含端到端验收脚本、GitHub Actions 持续集成、数据库备份/恢复脚本
 
 ## 技术栈
 
@@ -62,11 +63,23 @@ npm run dev
 
 > `admin / demo123456` 与 `clerk / demo123456` 仅用于本地演示。公开部署前请通过环境变量设置新密码，并替换 `SESSION_SECRET`。
 
+## 部署能力展示
+
+仓库包含可直接替换域名的 Docker Compose 配置：Caddy 对外提供 HTTPS，Next.js 应用和 SQLite 数据库运行在服务器上，数据与备份通过命名卷持久化。
+
+```bash
+cp .env.production.example .env.production
+# 编辑域名、会话密钥和演示账号密码
+docker compose up -d --build
+```
+
+完整的服务器准备、DNS、验证、备份和更新步骤见 [docs/06-部署演示.md](docs/06-部署演示.md)。这套配置用于展示远程部署能力，不要求连接你的真实项目或生产数据。
+
 ## 测试与验收
 
 ```bash
 npm run check         # 单元测试 + 类型检查 + 生产构建
-npm test              # 131 个单元测试
+npm test              # 136 个单元测试
 npm run typecheck     # 类型检查
 npm run build         # 生产构建
 npm run e2e           # 端到端验收（需先启动服务，默认 3000，可用 E2E_BASE_URL 指定端口）
@@ -79,6 +92,7 @@ npm run e2e           # 端到端验收（需先启动服务，默认 3000，可
 ```
 ├── .github/workflows/       # GitHub Actions 持续集成
 ├── docs/                    # 开发文档（需求、设计、计划、规范、验收）
+├── deploy/Caddyfile         # 域名 HTTPS 与反向代理配置
 ├── prisma/
 │   ├── schema.prisma        # 数据模型
 │   ├── migrations/          # 可追溯的数据库迁移
@@ -92,6 +106,8 @@ npm run e2e           # 端到端验收（需先启动服务，默认 3000，可
 │   └── services/            # 库存、结算、报表等核心业务服务
 ├── src/proxy.ts             # 登录态路由保护（Next.js Proxy）
 ├── tests/                   # 单元测试
+├── Dockerfile               # Next.js 应用容器镜像
+├── compose.yaml             # 应用、Caddy 与持久化卷编排
 ├── CONTRIBUTING.md          # 贡献指南
 └── SECURITY.md              # 安全与披露说明
 ```
