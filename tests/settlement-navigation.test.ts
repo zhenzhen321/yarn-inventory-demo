@@ -4,6 +4,11 @@ import { describe, expect, it } from 'vitest'
 
 const settlementRoot = path.resolve(process.cwd(), 'src', 'app', 'app', 'settlements')
 const homeSource = readFileSync(path.join(settlementRoot, 'page.tsx'), 'utf8')
+const newPageSource = readFileSync(path.join(settlementRoot, 'new', 'page.tsx'), 'utf8')
+const settleFormSource = readFileSync(
+  path.resolve(process.cwd(), 'src', 'components', 'settlements', 'SettleForm.tsx'),
+  'utf8',
+)
 
 describe('结算导航页', () => {
   const destinations = ['new', 'payables', 'receivables', 'factory-fees', 'records']
@@ -32,5 +37,14 @@ describe('结算导航页', () => {
       'utf8',
     )
     expect(filterSource).toContain('/app/settlements/records?')
+  })
+
+  it('登记页传给客户端的金额已转换为普通字符串', () => {
+    expect(newPageSource).toContain('remainingAmount: row.remainingAmount.toString()')
+    expect(newPageSource).toContain('owedAmount: row.owedAmount.toString()')
+    expect(settleFormSource).toContain('remainingAmount: string')
+    expect(settleFormSource).toContain('owedAmount: string')
+    expect(settleFormSource).not.toContain('CounterpartySummary')
+    expect(settleFormSource).not.toContain('Prisma.Decimal')
   })
 })

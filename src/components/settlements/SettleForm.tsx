@@ -5,7 +5,16 @@ import { useRouter } from 'next/navigation'
 import { Button } from '@/components/ui/Button'
 import { Input } from '@/components/ui/Input'
 import { Select } from '@/components/ui/Select'
-import type { CounterpartySummary } from '@/services/settlement'
+
+type OutstandingSummary = {
+  id: string
+  remainingAmount: string
+}
+
+type FactoryFeeSummary = {
+  id: string
+  owedAmount: string
+}
 
 export function SettleForm({
   suppliers,
@@ -21,9 +30,9 @@ export function SettleForm({
   suppliers: { id: string; name: string }[]
   customers: { id: string; name: string }[]
   factories: { id: string; name: string }[]
-  payables: CounterpartySummary[]
-  receivables: CounterpartySummary[]
-  factoryFees: { id: string; owedAmount: { toString(): string } }[]
+  payables: OutstandingSummary[]
+  receivables: OutstandingSummary[]
+  factoryFees: FactoryFeeSummary[]
   defaultHandler?: string
   initialSide?: string
   initialCounterpartyId?: string
@@ -48,8 +57,8 @@ export function SettleForm({
   const selected = summaries.find((s) => s.id === counterpartyId)
   const remaining = selected
     ? 'owedAmount' in selected
-      ? String(selected.owedAmount)
-      : String((selected as CounterpartySummary).remainingAmount)
+      ? selected.owedAmount
+      : selected.remainingAmount
     : ''
 
   useEffect(() => {

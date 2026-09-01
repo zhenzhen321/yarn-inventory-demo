@@ -15,14 +15,17 @@ export default async function NewSettlementPage({
     await Promise.all([
       prisma.counterparty.findMany({
         where: { active: true, type: { in: ['SUPPLIER', 'BOTH'] } },
+        select: { id: true, name: true },
         orderBy: { name: 'asc' },
       }),
       prisma.counterparty.findMany({
         where: { active: true, type: { in: ['CUSTOMER', 'BOTH'] } },
+        select: { id: true, name: true },
         orderBy: { name: 'asc' },
       }),
       prisma.warehouse.findMany({
         where: { active: true, type: 'FACTORY' },
+        select: { id: true, name: true },
         orderBy: { name: 'asc' },
       }),
       getPayableSummary(prisma),
@@ -30,6 +33,19 @@ export default async function NewSettlementPage({
       getFactoryFeeSummary(prisma),
       getSessionUser(),
     ])
+
+  const payableOptions = payables.map((row) => ({
+    id: row.id,
+    remainingAmount: row.remainingAmount.toString(),
+  }))
+  const receivableOptions = receivables.map((row) => ({
+    id: row.id,
+    remainingAmount: row.remainingAmount.toString(),
+  }))
+  const factoryFeeOptions = factoryFees.map((row) => ({
+    id: row.id,
+    owedAmount: row.owedAmount.toString(),
+  }))
 
   return (
     <div className="space-y-4">
@@ -42,9 +58,9 @@ export default async function NewSettlementPage({
         suppliers={suppliers}
         customers={customers}
         factories={factories}
-        payables={payables}
-        receivables={receivables}
-        factoryFees={factoryFees}
+        payables={payableOptions}
+        receivables={receivableOptions}
+        factoryFees={factoryFeeOptions}
         initialSide={filters.side ?? ''}
         initialCounterpartyId={filters.cp ?? ''}
       />
