@@ -18,10 +18,10 @@ jobs:
       COOKIE_SECURE: "false"
       NEXT_TELEMETRY_DISABLED: "1"
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
+      - uses: actions/checkout@v5
+      - uses: actions/setup-node@v5
         with:
-          node-version: 20.9.0
+          node-version: 20.19.0
           cache: npm
       - run: npm ci
       - run: npm run typecheck
@@ -32,5 +32,5 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 15
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
       - run: docker build --tag yarn-inventory-demo:ci .
