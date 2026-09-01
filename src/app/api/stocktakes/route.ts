@@ -6,6 +6,8 @@ import { getSessionUser } from '@/lib/auth'
 import { logAudit } from '@/lib/audit'
 
 export async function POST(req: Request) {
+  const user = await getSessionUser()
+  if (!user) return NextResponse.json({ error: '请先登录' }, { status: 401 })
   const body = await req.json().catch(() => null)
   const parsed = stocktakeSchema.safeParse(body)
   if (!parsed.success) {
@@ -16,7 +18,6 @@ export async function POST(req: Request) {
   }
   try {
     const stocktake = await createStocktake(prisma, parsed.data)
-    const user = await getSessionUser()
     await logAudit({
       userName: user?.name ?? '未知',
       action: 'STOCKTAKE_CREATE',

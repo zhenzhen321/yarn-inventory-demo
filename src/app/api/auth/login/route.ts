@@ -21,16 +21,17 @@ export async function POST(req: Request) {
     return NextResponse.json({ error: '请输入账号和密码' }, { status: 400 })
   }
 
-  const key = parsed.data.username
+  const username = parsed.data.username
   const ip = clientIp(req)
-  const lock = checkLoginLock(key)
+  const rateLimitKey = `${ip}:${username.toLocaleLowerCase()}`
+  const lock = checkLoginLock(rateLimitKey)
   if (lock.locked) {
     const minutes = Math.ceil((lock.remainingMs ?? 0) / 60000)
     await logAudit({
-      userName: key,
+      userName: username,
       action: 'LOGIN_FAILED',
       target: '登录',
-      detail: `账号 ${key} 因尝试次数过多被暂时锁定，IP：${ip}`,
+      detail: `账号 ${username} 因尝试次数过多被暂时锁定，IP：${ip}`,
     })
     return NextResponse.json(
       { error: `尝试次数过多，请 ${minutes} 分钟后再试` },
@@ -38,26 +39,27 @@ export async function POST(req: Request) {
     )
   }
 
-  const user = await prisma.user.findUnique({ where: { username: key } })
+  const user = await prisma.user.findUnique({ where: { username } })
   if (!user || !user.active || !(await verifyPassword(parsed.data.password, user.passwordHash))) {
-    recordLoginFailure(key)
+    recordLoginFailure(rateLimitKey)
     await logAudit({
-      userName: key,
+      userName: username,
       action: 'LOGIN_FAILED',
       target: '登录',
-      detail: `账号 ${key} 登录失败，IP：${ip}`,
+      detail: `账号 ${username} 登录失败，IP：${ip}`,
     })
     return NextResponse.json({ error: '账号或密码错误' }, { status: 401 })
   }
 
   const remember = parsed.data.remember ?? true
   const maxAge = remember ? MAX_AGE : SHORT_SESSION_AGE
-  recordLoginSuccess(key)
+  recordLoginSuccess(rateLimitKey)
   await logAudit({
+    userId: user.id,
     userName: user.name,
     action: 'LOGIN_SUCCESS',
     target: '登录',
-    detail: `账号 ${key} 登录成功，IP：${ip}`,
+    detail: `账号 ${username} 登录成功，IP：${ip}`,
   })
 
   const token = await signSession({ id: user.id, name: user.name, role: user.role }, maxAge)

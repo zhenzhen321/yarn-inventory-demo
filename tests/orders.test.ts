@@ -91,7 +91,7 @@ describe('出入库记录查询', () => {
     expect(await getOrderRecords(db, { yarnQ: '白' })).toHaveLength(2)
   })
 
-  it('明细包含名称/支数/色号/数量/金额', async () => {
+  it('明细包含展开显示所需的完整货品字段', async () => {
     await seed()
     const rows = await getOrderRecords(db, { yarnQ: '涤纶' })
     expect(rows).toHaveLength(1)
@@ -99,7 +99,10 @@ describe('出入库记录查询', () => {
     expect(it.yarnName).toBe('涤纶纱')
     expect(it.spec).toBe('32支')
     expect(it.color).toBe('黑色')
+    expect(it.unit).toBe('kg')
+    expect(it.batchNo).toBe('D-001')
     expect(it.weight.toString()).toBe('500')
+    expect(it.price.toString()).toBe('15')
     expect(it.amount.toString()).toBe('7500')
   })
 })

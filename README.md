@@ -12,18 +12,18 @@
 - 资金结算：按往来单位汇总应收应付，支持未结/部分/已结、超结拦截、折让登记
 - 安全与留痕：bcrypt 密码、JWT 会话、登录限速、CSRF 校验、全量审计日志、单据撤回可追溯
 - 报表与导出：库存金额、毛利估算、客户/供应商订单查询、近 30 天流水，全部支持 Excel 导出
-- 工程质量：102 个单元测试（14 个测试文件）、自包含端到端验收脚本、数据库备份/恢复脚本
+- 工程质量：130 个单元测试（20 个测试文件）、自包含端到端验收脚本、GitHub Actions 持续集成、数据库备份/恢复脚本
 
 ## 技术栈
 
 | 层 | 技术 |
 | --- | --- |
-| 前端 | Next.js 14（App Router）、React 18、Tailwind CSS |
+| 前端 | Next.js 16（App Router、Turbopack）、React 18、Tailwind CSS |
 | 后端 | Next.js Route Handlers（API Routes）、zod 校验 |
 | 数据层 | Prisma ORM + SQLite、Prisma Migrations |
 | 安全 | bcryptjs、jose（JWT）、登录限速、CSRF Origin 校验 |
 | 测试 | Vitest（单元测试）、自研 e2e 脚本（端到端验收） |
-| 其他 | SheetJS（Excel 导出） |
+| 其他 | ExcelJS（Excel 导出） |
 
 ## 开发流程（重点）
 
@@ -40,9 +40,12 @@
 
 ## 快速开始
 
+环境要求：Node.js 20.9 或更高版本、npm 10 或更高版本。
+
 ```bash
 npm install
-copy .env.example .env   # 修改 SESSION_SECRET 为随机长字符串
+# macOS / Linux: cp .env.example .env
+# Windows PowerShell: Copy-Item .env.example .env
 npx prisma db push
 npm run db:seed
 npm run dev
@@ -55,13 +58,16 @@ npm run dev
 | admin | demo123456 | 管理员 |
 | clerk | demo123456 | 仓管 |
 
-种子数据包含 3 个仓库、3 家往来单位、3 个纱线产品（5 个规格）、3 笔买入、2 笔卖出、2 笔调拨、1 次送加工与加工收回、1 次盘库、3 笔资金结算和 1 笔加工费付款，登录后即可体验全部页面。
+种子数据包含 3 个仓库、3 家往来单位、3 个纱线产品（6 个规格）、3 笔买入、2 笔卖出、2 笔调拨、1 次送加工与加工收回、1 次盘库、3 笔资金结算和 1 笔加工费付款，登录后即可体验全部页面。
+
+> `admin / demo123456` 与 `clerk / demo123456` 仅用于本地演示。公开部署前请通过环境变量设置新密码，并替换 `SESSION_SECRET`。
 
 ## 测试与验收
 
 ```bash
-npm test              # 102 个单元测试
-npx tsc --noEmit      # 类型检查
+npm run check         # 单元测试 + 类型检查 + 生产构建
+npm test              # 130 个单元测试
+npm run typecheck     # 类型检查
 npm run build         # 生产构建
 npm run e2e           # 端到端验收（需先启动服务，默认 3000，可用 E2E_BASE_URL 指定端口）
 ```
@@ -71,6 +77,7 @@ npm run e2e           # 端到端验收（需先启动服务，默认 3000，可
 ## 目录结构
 
 ```
+├── .github/workflows/       # GitHub Actions 持续集成
 ├── docs/                    # 开发文档（需求、设计、计划、规范、验收）
 ├── prisma/
 │   ├── schema.prisma        # 数据模型
@@ -83,9 +90,16 @@ npm run e2e           # 端到端验收（需先启动服务，默认 3000，可
 │   ├── components/          # 可复用 UI 组件
 │   ├── lib/                 # 认证、会话、校验、金额等基础库
 │   └── services/            # 库存、结算、报表等核心业务服务
-└── tests/                   # 单元测试
+├── src/proxy.ts             # 登录态路由保护（Next.js Proxy）
+├── tests/                   # 单元测试
+├── CONTRIBUTING.md          # 贡献指南
+└── SECURITY.md              # 安全与披露说明
 ```
+
+## 使用范围
+
+该项目适合业务建模、全栈工程和测试流程演示。SQLite 方案默认面向单机/单实例使用；如需生产部署，请额外评估数据库并发、权限模型、备份恢复、监控告警和合规要求。
 
 ## License
 
-MIT
+[MIT](LICENSE)

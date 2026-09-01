@@ -15,7 +15,8 @@ const feeSchema = z.object({
   outputWeight: z.coerce.number().positive('加工后重量必须大于 0').optional(),
 })
 
-export async function PATCH(req: Request, { params }: { params: { id: string } }) {
+export async function PATCH(req: Request, { params }: { params: Promise<{ id: string }> }) {
+  const { id } = await params
   const user = await getSessionUser()
   if (!user) return NextResponse.json({ error: '请先登录' }, { status: 401 })
   const body = await req.json().catch(() => null)
@@ -27,7 +28,7 @@ export async function PATCH(req: Request, { params }: { params: { id: string } }
     )
   }
   try {
-    const result = await settleProcessingFee(prisma, params.id, {
+    const result = await settleProcessingFee(prisma, id, {
       feePerKg: parsed.data.processingFeePerKg,
       inputWeight: parsed.data.inputWeight,
       handlerName: user.name,

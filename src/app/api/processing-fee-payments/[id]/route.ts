@@ -4,16 +4,17 @@ import { getSessionUser } from '@/lib/auth'
 import { logAudit } from '@/lib/audit'
 import { revertFactoryFeePayment } from '@/services/factory-fee'
 
-export async function DELETE(_req: Request, { params }: { params: { id: string } }) {
+export async function DELETE(_req: Request, { params }: { params: Promise<{ id: string }> }) {
+  const { id } = await params
   const user = await getSessionUser()
   if (!user) return NextResponse.json({ error: '请先登录' }, { status: 401 })
   try {
-    const row = await prisma.processingFeePayment.findUnique({ where: { id: params.id } })
+    const row = await prisma.processingFeePayment.findUnique({ where: { id: id } })
     if (!row) return NextResponse.json({ error: '付款记录不存在' }, { status: 404 })
     if (row.handlerName !== user.name) {
       return NextResponse.json({ error: '无权限：只能撤回自己的记录' }, { status: 403 })
     }
-    const deleted = await revertFactoryFeePayment(prisma, params.id)
+    const deleted = await revertFactoryFeePayment(prisma, id)
     await logAudit({
       userName: user.name,
       action: 'PROCESSING_FEE_PAYMENT_DELETE',

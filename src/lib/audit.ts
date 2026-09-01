@@ -1,6 +1,7 @@
 import { prisma } from '@/lib/prisma'
 
 export interface AuditEntry {
+  userId?: string
   userName: string
   action: string
   target: string
@@ -11,6 +12,7 @@ export async function logAudit(entry: AuditEntry): Promise<void> {
   try {
     await prisma.auditLog.create({
       data: {
+        userId: entry.userId ?? null,
         userName: entry.userName,
         action: entry.action,
         target: entry.target,

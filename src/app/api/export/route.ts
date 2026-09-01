@@ -1,5 +1,5 @@
 import { NextResponse } from 'next/server'
-import * as XLSX from 'xlsx'
+import ExcelJS from 'exceljs'
 import { Prisma } from '@prisma/client'
 import { prisma } from '@/lib/prisma'
 import {
@@ -21,7 +21,14 @@ function num(v: Prisma.Decimal | string | number): number {
   return typeof v === 'number' ? v : Number(v)
 }
 
-function exportXlsx(sheetName: string, rows: Record<string, unknown>[], filename: string) {
+function toCellValue(value: unknown): ExcelJS.CellValue {
+  if (value == null) return ''
+  if (typeof value === 'string' || typeof value === 'number' || typeof value === 'boolean') return value
+  if (value instanceof Date) return value
+  return String(value)
+}
+
+async function exportXlsx(sheetName: string, rows: Record<string, unknown>[], filename: string) {
   const plain = rows.map((r) => {
     const o: Record<string, unknown> = {}
     for (const [k, v] of Object.entries(r)) {
@@ -29,10 +36,26 @@ function exportXlsx(sheetName: string, rows: Record<string, unknown>[], filename
     }
     return o
   })
-  const wb = XLSX.utils.book_new()
-  XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(plain), sheetName)
-  const buf = XLSX.write(wb, { type: 'buffer', bookType: 'xlsx' })
-  return new NextResponse(buf, {
+  const workbook = new ExcelJS.Workbook()
+  const worksheet = workbook.addWorksheet(sheetName)
+  const headers = plain.length > 0 ? Object.keys(plain[0]) : []
+  if (headers.length > 0) {
+    const headerRow = worksheet.addRow(headers)
+    headerRow.font = { bold: true }
+    for (const row of plain) {
+      worksheet.addRow(headers.map((header) => toCellValue(row[header])))
+    }
+    worksheet.columns.forEach((column, index) => {
+      const header = headers[index] ?? ''
+      const maxLength = Math.max(
+        header.length,
+        ...plain.map((row) => String(row[header] ?? '').length),
+      )
+      column.width = Math.min(Math.max(maxLength + 2, 10), 40)
+    })
+  }
+  const buffer = await workbook.xlsx.writeBuffer()
+  return new NextResponse(new Uint8Array(buffer), {
     headers: {
       'Content-Type': 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
       'Content-Disposition': `attachment; filename*=UTF-8''${encodeURIComponent(filename)}`,
@@ -180,6 +203,7 @@ export async function GET(req: Request) {
       counterpartyId,
       from: from ? new Date(from) : undefined,
       to: to ? new Date(to) : undefined,
+      limit: null,
     })
     return exportXlsx(
       '结算记录',

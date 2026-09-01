@@ -10,16 +10,17 @@ import {
 export default async function InventoryPage({
   searchParams,
 }: {
-  searchParams: { warehouseId?: string; q?: string; includeZero?: string }
+  searchParams: Promise<{ warehouseId?: string; q?: string; includeZero?: string }>
 }) {
+  const filters = await searchParams
   const warehouses = await prisma.warehouse.findMany({
     where: { active: true },
     orderBy: { name: 'asc' },
   })
   const rows = await getInventoryRows(prisma, {
-    warehouseId: searchParams.warehouseId,
-    q: searchParams.q,
-    includeZero: searchParams.includeZero === '1',
+    warehouseId: filters.warehouseId,
+    q: filters.q,
+    includeZero: filters.includeZero === '1',
   })
   const total = rows.reduce((s, r) => s + Number(r.weight), 0)
   const factoryRows: FactoryInventoryRow[] = rows
@@ -44,7 +45,7 @@ export default async function InventoryPage({
       <ProcessingFeeSettle rows={factoryRows} />
       <InventoryFilter
         warehouses={warehouses}
-        includeZero={searchParams.includeZero === '1'}
+        includeZero={filters.includeZero === '1'}
       />
       <p className="text-sm text-gray-600">
         共 {rows.length} 条，总重量 {total.toFixed(2)} kg

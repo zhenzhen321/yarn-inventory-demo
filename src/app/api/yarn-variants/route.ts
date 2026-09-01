@@ -16,6 +16,8 @@ export async function GET(req: Request) {
 }
 
 export async function POST(req: Request) {
+  const user = await getSessionUser()
+  if (!user) return NextResponse.json({ error: '请先登录' }, { status: 401 })
   const body = await req.json().catch(() => null)
   const parsed = yarnVariantSchema.safeParse(body)
   if (!parsed.success) {
@@ -26,7 +28,6 @@ export async function POST(req: Request) {
   }
   try {
     const row = await prisma.yarnVariant.create({ data: parsed.data, include: { yarn: true } })
-    const user = await getSessionUser()
     await logAudit({
       userName: user?.name ?? '未知',
       action: 'YARN_VARIANT_CREATE',

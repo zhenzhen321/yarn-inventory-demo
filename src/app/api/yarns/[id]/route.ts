@@ -4,8 +4,10 @@ import { yarnUpdateSchema } from '@/lib/validation'
 import { requireAdmin } from '@/lib/auth'
 import { logAudit } from '@/lib/audit'
 import { deleteYarnSafe } from '@/services/deletion'
+import { updateYarnMaster } from '@/services/yarns'
 
-export async function PATCH(req: Request, { params }: { params: { id: string } }) {
+export async function PATCH(req: Request, { params }: { params: Promise<{ id: string }> }) {
+  const { id } = await params
   const admin = await requireAdmin().catch(() => null)
   if (!admin) return NextResponse.json({ error: '无权限：仅最高管理员可修改' }, { status: 403 })
   const body = await req.json().catch(() => null)
@@ -19,24 +21,40 @@ export async function PATCH(req: Request, { params }: { params: { id: string } }
   if (Object.keys(parsed.data).length === 0) {
     return NextResponse.json({ error: '没有需要修改的内容' }, { status: 400 })
   }
-  const row = await prisma.yarn
-    .update({ where: { id: params.id }, data: parsed.data })
-    .catch(() => null)
-  if (!row) return NextResponse.json({ error: '记录不存在' }, { status: 404 })
+  let result
+  try {
+    result = await updateYarnMaster(prisma, id, parsed.data)
+  } catch (error) {
+    const message = error instanceof Error ? error.message : '修改失败'
+    const status = message === '纱线不存在' ? 404 : message.startsWith('已存在') ? 409 : 400
+    return NextResponse.json({ error: message }, { status })
+  }
   await logAudit({
     userName: admin.name,
     action: 'YARN_UPDATE',
     target: '纱线',
-    detail: JSON.stringify(parsed.data),
+    detail: result.renamed
+      ? `全局更名：${result.previousName} → ${result.row.name}，关联规格 ${result.relatedVariantCount} 个，同步批次 ${result.renamedBatchCount} 个、历史批次文字 ${result.renamedSnapshotCount} 条；库存、订单和报表通过主档关联同步显示`
+      : `修改纱线：${result.row.name}，${JSON.stringify(parsed.data)}`,
   })
-  return NextResponse.json(row)
+  return NextResponse.json({
+    ...result.row,
+    renameImpact: {
+      renamed: result.renamed,
+      previousName: result.previousName,
+      relatedVariantCount: result.relatedVariantCount,
+      renamedBatchCount: result.renamedBatchCount,
+      renamedSnapshotCount: result.renamedSnapshotCount,
+    },
+  })
 }
 
-export async function DELETE(req: Request, { params }: { params: { id: string } }) {
+export async function DELETE(req: Request, { params }: { params: Promise<{ id: string }> }) {
+  const { id } = await params
   const admin = await requireAdmin().catch(() => null)
   if (!admin) return NextResponse.json({ error: '无权限：仅最高管理员可删除' }, { status: 403 })
   try {
-    const row = await deleteYarnSafe(prisma, params.id)
+    const row = await deleteYarnSafe(prisma, id)
     await logAudit({
       userName: admin.name,
       action: 'YARN_DELETE',

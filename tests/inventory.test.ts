@@ -110,6 +110,30 @@ describe('买入入库', () => {
     expect(f2?.freight.toString()).toBe('40')
   })
 
+  it('库存发生卖出后禁止修改原买入运费', async () => {
+    const base = await createBase()
+    const order = await createPurchase(db, {
+      date: new Date('2026-08-01'),
+      supplierId: base.supplierId,
+      warehouseId: base.warehouseA,
+      handlerName: 'admin',
+      items: [{ variantId: base.variantId, batchNo: 'F-MOVED', weight: 100, price: 10 }],
+    })
+    const rows = await getInventoryRows(db, { warehouseId: base.warehouseA })
+    await createSale(db, {
+      date: new Date('2026-08-02'),
+      customerId: base.customerId,
+      warehouseId: base.warehouseA,
+      handlerName: 'admin',
+      items: [{ inventoryId: rows[0].id, weight: 10, price: 12 }],
+    })
+    await expect(updatePurchaseFreight(db, order.id, 100)).rejects.toThrow(
+      '库存已发生卖出、调拨或盘点',
+    )
+    const unchanged = await db.purchaseOrder.findUniqueOrThrow({ where: { id: order.id } })
+    expect(unchanged.freight.toString()).toBe('0')
+  })
+
   it('修改不存在的买入单报错', async () => {
     await expect(updatePurchaseFreight(db, 'not-exist-id', 100)).rejects.toThrow('买入单不存在')
   })
@@ -128,7 +152,7 @@ describe('买入入库', () => {
     })
     expect(order.totalAmount.toString()).toBe('6300')
       expect(order.items[0].batch.batchNo).toBeTruthy()
-      expect(order.orderNo.startsWith('PO-')).toBe(true)
+      expect(order.orderNo).toMatch(/^PO-\d{8}-\d{4}$/)
     })
 
     it('撤回买入后新单号不与现存单据重复', async () => {
@@ -213,6 +237,33 @@ describe('买入入库', () => {
 })
 
 describe('卖出出库', () => {
+  it('同一库存重复出现在明细中时整单拒绝且库存不变', async () => {
+    const base = await createBase()
+    await createPurchase(db, {
+      date: new Date('2026-08-01'),
+      supplierId: base.supplierId,
+      warehouseId: base.warehouseA,
+      handlerName: 'admin',
+      items: [{ variantId: base.variantId, batchNo: 'DUP-1', weight: 100, price: 20 }],
+    })
+    const rows = await getInventoryRows(db, { warehouseId: base.warehouseA })
+    await expect(
+      createSale(db, {
+        date: new Date('2026-08-05'),
+        customerId: base.customerId,
+        warehouseId: base.warehouseA,
+        handlerName: 'admin',
+        items: [
+          { inventoryId: rows[0].id, weight: 60, price: 22 },
+          { inventoryId: rows[0].id, weight: 60, price: 22 },
+        ],
+      }),
+    ).rejects.toThrow('同一库存不能重复选择')
+    const after = await db.inventory.findUniqueOrThrow({ where: { id: rows[0].id } })
+    expect(after.weight.toString()).toBe('100')
+    expect(await db.saleOrder.count()).toBe(0)
+  })
+
   it('出库后库存减少', async () => {
     const base = await createBase()
     await createPurchase(db, {

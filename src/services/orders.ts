@@ -15,7 +15,9 @@ export interface OrderItemRecord {
   spec: string
   color: string
   unit: string
+  batchNo: string
   weight: Prisma.Decimal
+  price: Prisma.Decimal
   amount: Prisma.Decimal
   packages: number | null
 }
@@ -119,7 +121,9 @@ export async function getOrderRecords(
         spec: it.variant.spec,
         color: it.variant.color,
         unit: it.variant.unit,
+        batchNo: it.batch.batchNo,
         weight: it.weight,
+        price: it.price,
         amount: it.amount,
         packages: it.packages,
       })),
@@ -142,7 +146,9 @@ export async function getOrderRecords(
         spec: it.inventory.variant.spec,
         color: it.inventory.variant.color,
         unit: it.inventory.variant.unit,
+        batchNo: it.inventory.batch.batchNo,
         weight: it.weight,
+        price: it.price,
         amount: it.amount,
         packages: it.packages,
       })),

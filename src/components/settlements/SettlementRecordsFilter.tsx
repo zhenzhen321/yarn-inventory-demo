@@ -30,13 +30,13 @@ export function SettlementRecordsFilter({
       if (v) params.set(k, v)
       else params.delete(k)
     }
-    router.push(`/app/settlements?${params.toString()}`)
+    router.push(`/app/settlements/records?${params.toString()}`)
   }
 
   function reset() {
     const params = new URLSearchParams(sp.toString())
     for (const k of ['recSide', 'recCounterpartyId', 'recFrom', 'recTo']) params.delete(k)
-    router.push(`/app/settlements?${params.toString()}`)
+    router.push(`/app/settlements/records?${params.toString()}`)
   }
 
   return (

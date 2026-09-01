@@ -11,7 +11,7 @@ export async function POST(req: NextRequest) {
     target: '登录',
     detail: '退出登录',
   })
-  const res = NextResponse.redirect(new URL('/login', req.url))
+  const res = NextResponse.redirect(new URL('/login', req.url), { status: 303 })
   res.cookies.set(SESSION_COOKIE, '', {
     httpOnly: true,
     sameSite: 'lax',

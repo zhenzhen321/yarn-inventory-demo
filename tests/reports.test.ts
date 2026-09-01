@@ -46,8 +46,10 @@ describe('库存金额', () => {
 describe('进出流水', () => {
   it('合并买入与卖出并按日期倒序', async () => {
     const base = await createBase(db)
+    const saleDate = new Date()
+    const purchaseDate = new Date(saleDate.getTime() - 24 * 60 * 60 * 1000)
     await createPurchase(db, {
-      date: new Date('2026-08-01'),
+      date: purchaseDate,
       supplierId: base.supplierId,
       warehouseId: base.warehouseA,
       handlerName: '爸爸',
@@ -55,7 +57,7 @@ describe('进出流水', () => {
     })
     const rows = await getInventoryRows(db, { warehouseId: base.warehouseA })
     await createSale(db, {
-      date: new Date('2026-08-05'),
+      date: saleDate,
       customerId: base.customerId,
       warehouseId: base.warehouseA,
       handlerName: '爸爸',

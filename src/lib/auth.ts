@@ -1,5 +1,6 @@
 import { cookies } from 'next/headers'
 import bcrypt from 'bcryptjs'
+import { prisma } from '@/lib/prisma'
 import { SESSION_COOKIE, verifySession, type SessionPayload } from '@/lib/session'
 
 export async function hashPassword(password: string): Promise<string> {
@@ -11,10 +12,17 @@ export async function verifyPassword(password: string, hash: string): Promise<bo
 }
 
 export async function getSessionUser(): Promise<SessionPayload | null> {
-  const token = cookies().get(SESSION_COOKIE)?.value
+  const cookieStore = await cookies()
+  const token = cookieStore.get(SESSION_COOKIE)?.value
   if (!token) return null
   try {
-    return await verifySession(token)
+    const payload = await verifySession(token)
+    const user = await prisma.user.findUnique({
+      where: { id: payload.sub },
+      select: { id: true, name: true, role: true, active: true },
+    })
+    if (!user?.active) return null
+    return { sub: user.id, name: user.name, role: user.role }
   } catch {
     return null
   }

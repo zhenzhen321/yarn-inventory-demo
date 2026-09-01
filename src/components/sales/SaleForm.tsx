@@ -224,10 +224,18 @@ export function SaleForm({
         加一行
       </Button>
 
-      <p className="text-sm">合计：¥{total.toFixed(2)}</p>
-      {savedOrderNo && <p className="text-sm text-green-600">保存成功，单号：{savedOrderNo}</p>}
-      {message && <p className="text-sm text-red-600">{message}</p>}
-      <Button type="submit">保存出库单</Button>
+      <div className="mt-8 space-y-3 border-t pt-6">
+        <p className="text-sm">合计：¥{total.toFixed(2)}</p>
+        {savedOrderNo && (
+          <p className="text-sm text-green-600">保存成功，单号：{savedOrderNo}</p>
+        )}
+        {message && <p className="text-sm text-red-600">{message}</p>}
+        <div className="flex justify-end">
+          <Button type="submit" className="w-full sm:w-auto sm:min-w-40">
+            保存出库单
+          </Button>
+        </div>
+      </div>
     </form>
   )
 }

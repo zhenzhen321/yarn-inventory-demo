@@ -11,6 +11,13 @@ describe('session', () => {
     expect(payload.role).toBe('OWNER')
   })
 
+  it('过短密钥会被拒绝', async () => {
+    process.env.SESSION_SECRET = 'too-short'
+    await expect(signSession({ id: 'u1', name: '爸爸', role: 'OWNER' })).rejects.toThrow(
+      '至少需要 32 字节',
+    )
+  })
+
   it('篡改令牌后验签失败', async () => {
     process.env.SESSION_SECRET = 'test-secret-at-least-32-characters-long!!'
     const token = await signSession({ id: 'u1', name: '爸爸', role: 'OWNER' })

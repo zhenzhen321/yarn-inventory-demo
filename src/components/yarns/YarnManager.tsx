@@ -94,10 +94,25 @@ export function YarnManager({ initialProducts }: { initialProducts: Product[] })
       setMessage('名称不能为空')
       return
     }
+    const currentProduct = products.find((product) => product.id === editingProduct)
+    const nextName = editingProductForm.name.trim()
+    if (
+      currentProduct &&
+      currentProduct.name !== nextName &&
+      !window.confirm(
+        `确定将“${currentProduct.name}”全局更名为“${nextName}”吗？库存、历史订单、出入库记录、报表及系统自动生成的批次号都会同步显示新名称。`,
+      )
+    ) {
+      return
+    }
     const { ok, data } = await jsonFetch(`/api/yarns/${editingProduct}`, 'PATCH', editingProductForm)
     if (ok) {
       setEditingProduct(null)
-      setMessage('产品已修改')
+      setMessage(
+        data.renameImpact?.renamed
+          ? `已全局更名：${data.renameImpact.previousName} → ${data.name}；所有关联业务记录及 ${data.renameImpact.renamedBatchCount} 个批次号已同步`
+          : '产品已修改',
+      )
       refresh()
     } else {
       setMessage(data.error || '保存失败')
@@ -196,6 +211,11 @@ export function YarnManager({ initialProducts }: { initialProducts: Product[] })
   return (
     <div className="space-y-4">
       {message && <p className="text-sm text-gray-600">{message}</p>}
+
+      <div className="rounded-lg border border-blue-200 bg-blue-50 px-4 py-3 text-sm text-blue-900">
+        更改产品名称属于全局更名：库存、订单、出入库记录、报表和系统自动生成的批次号会同步显示新名称；
+        历史审计日志保留修改前文字，便于追溯。
+      </div>
 
       <form
         onSubmit={addProduct}
@@ -365,7 +385,7 @@ function ProductRows({
               </div>
               <div className="flex gap-2">
                 <Button type="button" onClick={onEditProduct} className={editBtn}>
-                  编辑产品
+                  全局更名/编辑
                 </Button>
                 {expanded && (
                   <Button type="button" onClick={onAddVariant} className={addBtn}>

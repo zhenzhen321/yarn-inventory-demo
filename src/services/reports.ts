@@ -79,6 +79,20 @@ export interface OrderQueryRow {
   counterpartyName: string
   totalAmount: Prisma.Decimal
   freight: Prisma.Decimal
+  note: string | null
+  items: OrderQueryItemRow[]
+}
+
+export interface OrderQueryItemRow {
+  yarnName: string
+  spec: string
+  color: string
+  unit: string
+  batchNo: string
+  weight: Prisma.Decimal
+  price: Prisma.Decimal
+  amount: Prisma.Decimal
+  packages: number | null
 }
 
 export async function getCustomerOrders(
@@ -88,7 +102,17 @@ export async function getCustomerOrders(
   const orders = await db.saleOrder.findMany({
     where: { customerId },
     orderBy: { date: 'desc' },
-    include: { customer: true, warehouse: true },
+    include: {
+      customer: true,
+      warehouse: true,
+      items: {
+        include: {
+          inventory: {
+            include: { variant: { include: { yarn: true } }, batch: true },
+          },
+        },
+      },
+    },
   })
   return orders.map((o) => ({
     id: o.id,
@@ -99,6 +123,18 @@ export async function getCustomerOrders(
     counterpartyName: o.customer.name,
     totalAmount: o.totalAmount,
     freight: o.freight,
+    note: o.note,
+    items: o.items.map((item) => ({
+      yarnName: item.inventory.variant.yarn.name,
+      spec: item.inventory.variant.spec,
+      color: item.inventory.variant.color,
+      unit: item.inventory.variant.unit,
+      batchNo: item.inventory.batch.batchNo,
+      weight: item.weight,
+      price: item.price,
+      amount: item.amount,
+      packages: item.packages,
+    })),
   }))
 }
 
@@ -109,7 +145,11 @@ export async function getSupplierOrders(
   const orders = await db.purchaseOrder.findMany({
     where: { supplierId },
     orderBy: { date: 'desc' },
-    include: { supplier: true, warehouse: true },
+    include: {
+      supplier: true,
+      warehouse: true,
+      items: { include: { variant: { include: { yarn: true } }, batch: true } },
+    },
   })
   return orders.map((o) => ({
     id: o.id,
@@ -120,6 +160,18 @@ export async function getSupplierOrders(
     counterpartyName: o.supplier.name,
     totalAmount: o.totalAmount,
     freight: o.freight,
+    note: o.note,
+    items: o.items.map((item) => ({
+      yarnName: item.variant.yarn.name,
+      spec: item.variant.spec,
+      color: item.variant.color,
+      unit: item.variant.unit,
+      batchNo: item.batch.batchNo,
+      weight: item.weight,
+      price: item.price,
+      amount: item.amount,
+      packages: item.packages,
+    })),
   }))
 }
 

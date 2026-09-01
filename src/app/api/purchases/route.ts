@@ -6,6 +6,8 @@ import { getSessionUser } from '@/lib/auth'
 import { logAudit } from '@/lib/audit'
 
 export async function POST(req: Request) {
+  const user = await getSessionUser()
+  if (!user) return NextResponse.json({ error: '请先登录' }, { status: 401 })
   const body = await req.json().catch(() => null)
   const parsed = purchaseSchema.safeParse(body)
   if (!parsed.success) {
@@ -16,14 +18,24 @@ export async function POST(req: Request) {
   }
   try {
     const order = await createPurchase(prisma, parsed.data)
-    const user = await getSessionUser()
     await logAudit({
       userName: user?.name ?? '未知',
       action: 'PURCHASE_CREATE',
       target: '买入入库',
       detail: `单号 ${order.orderNo}，供应商 ${order.supplier.name}，货款 ${order.totalAmount}，运费 ${order.freight}`,
     })
-    return NextResponse.json({ orderNo: order.orderNo }, { status: 201 })
+    return NextResponse.json(
+      {
+        orderNo: order.orderNo,
+        items: order.items.map((item) => ({
+          yarnName: item.variant.yarn.name,
+          spec: item.variant.spec,
+          color: item.variant.color,
+          packages: item.packages,
+        })),
+      },
+      { status: 201 },
+    )
   } catch (e) {
     const message = e instanceof Error ? e.message : '保存失败'
     return NextResponse.json({ error: message }, { status: 400 })

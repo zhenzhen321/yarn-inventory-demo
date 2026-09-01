@@ -5,7 +5,8 @@ import { requireAdmin } from '@/lib/auth'
 import { logAudit } from '@/lib/audit'
 import { deleteWarehouseSafe } from '@/services/deletion'
 
-export async function PATCH(req: Request, { params }: { params: { id: string } }) {
+export async function PATCH(req: Request, { params }: { params: Promise<{ id: string }> }) {
+  const { id } = await params
   const admin = await requireAdmin().catch(() => null)
   if (!admin) return NextResponse.json({ error: '无权限：仅最高管理员可修改' }, { status: 403 })
   const body = await req.json().catch(() => null)
@@ -20,7 +21,7 @@ export async function PATCH(req: Request, { params }: { params: { id: string } }
     return NextResponse.json({ error: '没有需要修改的内容' }, { status: 400 })
   }
   const row = await prisma.warehouse
-    .update({ where: { id: params.id }, data: parsed.data })
+    .update({ where: { id: id }, data: parsed.data })
     .catch(() => null)
   if (!row) return NextResponse.json({ error: '记录不存在' }, { status: 404 })
   await logAudit({
@@ -32,11 +33,12 @@ export async function PATCH(req: Request, { params }: { params: { id: string } }
   return NextResponse.json(row)
 }
 
-export async function DELETE(req: Request, { params }: { params: { id: string } }) {
+export async function DELETE(req: Request, { params }: { params: Promise<{ id: string }> }) {
+  const { id } = await params
   const admin = await requireAdmin().catch(() => null)
   if (!admin) return NextResponse.json({ error: '无权限：仅最高管理员可删除' }, { status: 403 })
   try {
-    const row = await deleteWarehouseSafe(prisma, params.id)
+    const row = await deleteWarehouseSafe(prisma, id)
     await logAudit({
       userName: admin.name,
       action: 'WAREHOUSE_DELETE',

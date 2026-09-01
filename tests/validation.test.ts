@@ -114,14 +114,14 @@ describe('第二批校验', () => {
     ).toBe(false)
   })
 
-  it('经办人必填且不能为空', () => {
+  it('经办人只能是 admin/clerk', () => {
     const base = {
       date: '2026-08-11',
       customerId: 'c1',
       warehouseId: 'w1',
       items: [{ inventoryId: 'i1', weight: 10, price: 20 }],
     }
-    expect(saleSchema.safeParse({ ...base, handlerName: '' }).success).toBe(false)
+    expect(saleSchema.safeParse({ ...base, handlerName: '其他' }).success).toBe(false)
     expect(saleSchema.safeParse({ ...base, handlerName: 'admin' }).success).toBe(true)
     expect(saleSchema.safeParse({ ...base, handlerName: 'clerk' }).success).toBe(true)
     expect(
@@ -130,9 +130,9 @@ describe('第二批校验', () => {
         counterpartyId: 'c1',
         amount: 100,
         date: '2026-08-11',
-        handlerName: 'admin',
+        handlerName: '其他',
       }).success,
-    ).toBe(true)
+    ).toBe(false)
   })
 })
 
@@ -223,6 +223,41 @@ describe('运费与加工厂校验', () => {
         handlerName: 'admin',
         items: [{ inventoryId: 'i1', weight: 10 }],
         processingFeePerKg: -1,
+      }).success,
+    ).toBe(false)
+  })
+})
+
+describe('重复库存明细校验', () => {
+  it('卖出、调拨和盘点都拒绝重复 inventoryId', () => {
+    const duplicated = [{ inventoryId: 'i1', weight: 10, price: 20 }, { inventoryId: 'i1', weight: 5, price: 21 }]
+    expect(
+      saleSchema.safeParse({
+        date: '2026-08-11',
+        customerId: 'c1',
+        warehouseId: 'w1',
+        handlerName: 'admin',
+        items: duplicated,
+      }).success,
+    ).toBe(false)
+    expect(
+      transferSchema.safeParse({
+        date: '2026-08-11',
+        fromWarehouseId: 'w1',
+        toWarehouseId: 'w2',
+        handlerName: 'admin',
+        items: duplicated.map(({ inventoryId, weight }) => ({ inventoryId, weight })),
+      }).success,
+    ).toBe(false)
+    expect(
+      stocktakeSchema.safeParse({
+        date: '2026-08-11',
+        warehouseId: 'w1',
+        handlerName: 'admin',
+        items: [
+          { inventoryId: 'i1', actualWeight: 10 },
+          { inventoryId: 'i1', actualWeight: 5 },
+        ],
       }).success,
     ).toBe(false)
   })

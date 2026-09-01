@@ -138,6 +138,8 @@ export interface SettlementRecordFilter {
   counterpartyId?: string
   from?: Date
   to?: Date
+  /** null 表示导出全部；页面查询默认最多 500 条 */
+  limit?: number | null
 }
 
 export async function getSettlementRecords(
@@ -159,7 +161,7 @@ export async function getSettlementRecords(
     },
     include: { counterparty: true },
     orderBy: [{ date: 'desc' }, { createdAt: 'desc' }],
-    take: 500,
+    ...(filter.limit === null ? {} : { take: filter.limit ?? 500 }),
   })
   return rows.map((r) => ({
     id: r.id,

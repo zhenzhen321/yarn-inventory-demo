@@ -2,7 +2,12 @@ import { beforeEach, describe, expect, it } from 'vitest'
 import type { PrismaClient } from '@prisma/client'
 import { getTestDb, resetDb } from './helpers/db'
 import { createBase } from './helpers/base'
-import { createPurchase, createSale, getInventoryRows } from '@/services/inventory'
+import {
+  archiveZeroInventory,
+  createPurchase,
+  createSale,
+  getInventoryRows,
+} from '@/services/inventory'
 import { createSettlement, getPayableSummary, getReceivableSummary } from '@/services/settlement'
 import { revertPurchase, revertSale, revertSettlement } from '@/services/revert'
 
@@ -66,6 +71,44 @@ describe('撤回买入', () => {
     expect(await db.purchaseOrder.count()).toBe(0)
   })
 
+  it('同批次存在归档行时撤回新买入只扣活动行', async () => {
+    const base = await createBase(db)
+    await createPurchase(db, {
+      date: new Date('2026-08-01'),
+      supplierId: base.supplierId,
+      warehouseId: base.warehouseA,
+      handlerName: 'admin',
+      items: [{ variantId: base.variantId, batchNo: 'ARCHIVE-P', weight: 100, price: 20 }],
+    })
+    const original = await getInventoryRows(db, { warehouseId: base.warehouseA })
+    await createSale(db, {
+      date: new Date('2026-08-02'),
+      customerId: base.customerId,
+      warehouseId: base.warehouseA,
+      handlerName: 'admin',
+      items: [{ inventoryId: original[0].id, weight: 100, price: 22 }],
+    })
+    await archiveZeroInventory(db, base.warehouseA)
+
+    const second = await createPurchase(db, {
+      date: new Date('2026-08-03'),
+      supplierId: base.supplierId,
+      warehouseId: base.warehouseA,
+      handlerName: 'admin',
+      items: [{ variantId: base.variantId, batchNo: 'ARCHIVE-P', weight: 50, price: 21 }],
+    })
+    await revertPurchase(db, second.id)
+
+    const allRows = await db.inventory.findMany({
+      where: { warehouseId: base.warehouseA },
+      orderBy: { archived: 'desc' },
+    })
+    expect(allRows).toHaveLength(2)
+    expect(allRows.every((row) => row.weight.toString() === '0')).toBe(true)
+    expect(allRows.find((row) => row.archived)?.cost.toString()).toBe('0')
+    expect(allRows.find((row) => !row.archived)?.cost.toString()).toBe('0')
+  })
+
   it('货已被卖出则禁止撤回', async () => {
     const base = await createBase(db)
     const order = await createPurchase(db, {
@@ -107,6 +150,34 @@ describe('撤回买入', () => {
 })
 
 describe('撤回卖出', () => {
+  it('零库存归档后撤回卖出会恢复为可见库存', async () => {
+    const base = await createBase(db)
+    await createPurchase(db, {
+      date: new Date('2026-08-01'),
+      supplierId: base.supplierId,
+      warehouseId: base.warehouseA,
+      handlerName: 'admin',
+      items: [{ variantId: base.variantId, batchNo: 'ARCHIVE-1', weight: 100, price: 20 }],
+    })
+    const rows = await getInventoryRows(db, { warehouseId: base.warehouseA })
+    const sale = await createSale(db, {
+      date: new Date('2026-08-02'),
+      customerId: base.customerId,
+      warehouseId: base.warehouseA,
+      handlerName: 'admin',
+      items: [{ inventoryId: rows[0].id, weight: 100, price: 22 }],
+    })
+    await archiveZeroInventory(db, base.warehouseA)
+    expect(await getInventoryRows(db, { warehouseId: base.warehouseA, includeZero: true })).toHaveLength(0)
+
+    await revertSale(db, sale.id)
+
+    const restored = await getInventoryRows(db, { warehouseId: base.warehouseA })
+    expect(restored).toHaveLength(1)
+    expect(restored[0].weight.toString()).toBe('100')
+    expect(restored[0].archived).toBe(false)
+  })
+
   it('撤回后库存与成本加回', async () => {
     const base = await createBase(db)
     await createPurchase(db, {

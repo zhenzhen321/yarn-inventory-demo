@@ -7,6 +7,7 @@ import { Input } from '@/components/ui/Input'
 import { ExpressionInput } from '@/components/ui/ExpressionInput'
 import { Select } from '@/components/ui/Select'
 import { resolveNumeric } from '@/lib/expression'
+import { LabelPrintButton, type LabelPrintOrder } from '@/components/labels/LabelPrintButton'
 
 interface VariantOption {
   id: string
@@ -61,6 +62,7 @@ export function PurchaseForm({
   })
   const [message, setMessage] = useState('')
   const [savedOrderNo, setSavedOrderNo] = useState('')
+  const [savedLabelOrder, setSavedLabelOrder] = useState<LabelPrintOrder | null>(null)
 
   function updateRow(idx: number, key: keyof Row, value: string) {
     setRows((prev) =>
@@ -113,6 +115,7 @@ export function PurchaseForm({
     if (res.ok) {
       const data = await res.json()
       setSavedOrderNo(data.orderNo)
+      setSavedLabelOrder({ orderNo: data.orderNo, items: data.items })
       const first = products[0]
       setRows([
         {
@@ -300,10 +303,25 @@ export function PurchaseForm({
         加一行
       </Button>
 
-      <p className="text-sm">合计：¥{total.toFixed(2)}</p>
-      {savedOrderNo && <p className="text-sm text-green-600">保存成功，单号：{savedOrderNo}</p>}
-      {message && <p className="text-sm text-red-600">{message}</p>}
-      <Button type="submit">保存入库单</Button>
+      <div className="mt-8 space-y-3 border-t pt-6">
+        <p className="text-sm">合计：¥{total.toFixed(2)}</p>
+        {savedOrderNo && (
+          <div className="flex flex-wrap items-center justify-between gap-3 rounded-lg border border-green-200 bg-green-50 p-3">
+            <p className="text-sm font-medium text-green-700">
+              保存成功，单号：{savedOrderNo}
+            </p>
+            {savedLabelOrder ? (
+              <LabelPrintButton order={savedLabelOrder} label="打印本单标签" />
+            ) : null}
+          </div>
+        )}
+        {message && <p className="text-sm text-red-600">{message}</p>}
+        <div className="flex justify-end">
+          <Button type="submit" className="w-full sm:w-auto sm:min-w-40">
+            保存入库单
+          </Button>
+        </div>
+      </div>
     </form>
   )
 }

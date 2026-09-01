@@ -3,12 +3,18 @@
   "private": true,
   "version": "1.0.0",
   "description": "纱线进销存管理系统演示版：买入/卖出/调拨/盘库/结算/报表，文档驱动的全栈项目",
+  "license": "MIT",
+  "engines": {
+    "node": ">=20.9.0"
+  },
   "scripts": {
     "dev": "next dev",
     "build": "next build",
     "start": "next start",
     "start:home": "next start -H 0.0.0.0 -p 3000",
     "test": "vitest run",
+    "typecheck": "tsc --noEmit",
+    "check": "npm run test && npm run typecheck && npm run build",
     "e2e": "node scripts/e2e.mjs",
     "backup": "node scripts/backup-db.js",
     "migrate:dev": "npm run backup && prisma migrate dev",
@@ -20,11 +26,11 @@
   "dependencies": {
     "@prisma/client": "^5.22.0",
     "bcryptjs": "^2.4.3",
+    "exceljs": "^4.4.0",
     "jose": "^5.9.6",
-    "next": "^14.2.21",
+    "next": "16.3.3",
     "react": "^18.3.1",
     "react-dom": "^18.3.1",
-    "xlsx": "^0.18.5",
     "zod": "^3.23.8"
   },
   "devDependencies": {
@@ -38,10 +44,13 @@
     "tailwindcss": "^3.4.15",
     "tsx": "^4.19.2",
     "typescript": "^5.6.3",
-    "vitest": "^1.6.0"
+    "vitest": "^4.1.11"
   },
   "prisma": {
     "seed": "tsx prisma/seed.ts"
+  },
+  "overrides": {
+    "uuid": "11.1.1"
   },
   "allowScripts": {
     "@prisma/client@5.22.0": true,

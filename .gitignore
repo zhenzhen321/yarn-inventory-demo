@@ -1,8 +1,12 @@
 node_modules/
 .next/
 .next-build/
+coverage/
 backups/
 .env
+.env.*
+!.env.example
+!.env.production.example
 *.db
 *.db-journal
 *.db-wal
@@ -11,3 +15,5 @@ backups/
 prisma/schema.test.prisma
 .server-*.log
 .prod-*.log
+*.log
+.DS_Store

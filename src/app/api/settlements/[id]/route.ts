@@ -4,19 +4,20 @@ import { getSessionUser } from '@/lib/auth'
 import { logAudit } from '@/lib/audit'
 import { revertSettlement } from '@/services/revert'
 
-export async function DELETE(_req: Request, { params }: { params: { id: string } }) {
+export async function DELETE(_req: Request, { params }: { params: Promise<{ id: string }> }) {
+  const { id } = await params
   const user = await getSessionUser()
   if (!user) return NextResponse.json({ error: '请先登录' }, { status: 401 })
   try {
     const s = await prisma.settlement.findUnique({
-      where: { id: params.id },
+      where: { id: id },
       include: { counterparty: true },
     })
     if (!s) return NextResponse.json({ error: '结算记录不存在' }, { status: 404 })
     if (user.name !== s.handlerName) {
       return NextResponse.json({ error: '无权限：只能撤回自己的记录' }, { status: 403 })
     }
-    await revertSettlement(prisma, params.id)
+    await revertSettlement(prisma, id)
     await logAudit({
       userName: user.name,
       action: 'SETTLEMENT_DELETE',

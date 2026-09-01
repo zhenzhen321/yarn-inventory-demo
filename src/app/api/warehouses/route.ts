@@ -60,11 +60,12 @@ export async function GET(req: Request) {
 }
 
 export async function POST(req: Request) {
+  const user = await getSessionUser()
+  if (!user) return NextResponse.json({ error: '请先登录' }, { status: 401 })
   const body = await req.json().catch(() => null)
   const parsed = warehouseSchema.safeParse(body)
   if (!parsed.success) return NextResponse.json({ error: '参数不正确' }, { status: 400 })
   const row = await prisma.warehouse.create({ data: parsed.data })
-  const user = await getSessionUser()
   await logAudit({
     userName: user?.name ?? '未知',
     action: 'WAREHOUSE_CREATE',

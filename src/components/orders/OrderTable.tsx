@@ -1,116 +1,174 @@
 'use client'
 
-import { useState } from 'react'
+import { Fragment, useState } from 'react'
 import { Table } from '@/components/ui/Table'
-import { CollapseToggle } from '@/components/ui/CollapseToggle'
 import { RevertButton } from '@/components/common/RevertButton'
-import type { OrderRecord } from '@/services/orders'
+import { LabelPrintButton } from '@/components/labels/LabelPrintButton'
+
+export interface OrderTableItem {
+  yarnName: string
+  spec: string
+  color: string
+  unit: string
+  batchNo: string
+  weight: string
+  price: string
+  amount: string
+  packages: number | null
+}
+
+export interface OrderTableRecord {
+  id: string
+  orderType: 'PURCHASE' | 'SALE'
+  orderNo: string
+  date: string
+  counterpartyName: string
+  warehouseName: string
+  handlerName: string
+  totalAmount: string
+  freight: string
+  note: string | null
+  items: OrderTableItem[]
+}
+
+function summarize(values: string[]) {
+  const unique = [...new Set(values.filter(Boolean))]
+  if (unique.length <= 2) return unique.join('、') || '-'
+  return `${unique.slice(0, 2).join('、')} 等${unique.length}种`
+}
 
 export function OrderTable({
   orders,
   currentUserName,
 }: {
-  orders: OrderRecord[]
+  orders: OrderTableRecord[]
   currentUserName?: string
 }) {
-  const [expanded, setExpanded] = useState<Set<string>>(new Set())
+  const [expandedIds, setExpandedIds] = useState<Set<string>>(() => new Set())
 
-  function toggle(id: string) {
-    setExpanded((prev) => {
-      const next = new Set(prev)
-      if (next.has(id)) next.delete(id)
-      else next.add(id)
+  function toggle(orderId: string) {
+    setExpandedIds((current) => {
+      const next = new Set(current)
+      if (next.has(orderId)) next.delete(orderId)
+      else next.add(orderId)
       return next
     })
   }
 
   return (
-    <Table
-      headers={[
-        '',
-        '日期',
-        '供应商/客户',
-        '名称',
-        '支数',
-        '色号',
-        '单位',
-        '数量',
-        '金额 (元)',
-        '备注',
-        '操作',
-      ]}
-    >
-      {orders.length === 0 && (
+    <Table headers={['单号', '供应商/客户', '支数', '色号', '总额 (元)']}>
+      {orders.length === 0 ? (
         <tr>
-          <td colSpan={11} className="text-center text-gray-400">
-            暂无记录
-          </td>
+          <td colSpan={5} className="py-8 text-center text-gray-500">暂无记录</td>
         </tr>
-      )}
-      {orders.map((o) => (
-        <OrderRows
-          key={o.id}
-          order={o}
-          isOpen={expanded.has(o.id)}
-          onToggle={() => toggle(o.id)}
-          currentUserName={currentUserName}
-        />
-      ))}
-    </Table>
-  )
-}
+      ) : null}
+      {orders.map((order) => {
+        const expanded = expandedIds.has(order.id)
+        const detailsId = `order-record-details-${order.id}`
+        const canRevert = Boolean(currentUserName && currentUserName === order.handlerName)
+        const revertHref =
+          order.orderType === 'PURCHASE'
+            ? `/api/purchases/${order.id}`
+            : `/api/sales/${order.id}`
 
-function OrderRows({
-  order,
-  isOpen,
-  onToggle,
-  currentUserName,
-}: {
-  order: OrderRecord
-  isOpen: boolean
-  onToggle: () => void
-  currentUserName?: string
-}) {
-  const canRevert = !!currentUserName && currentUserName === order.handlerName
-  const revertHref =
-    order.orderType === 'PURCHASE' ? `/api/purchases/${order.id}` : `/api/sales/${order.id}`
-  return (
-    <>
-      {order.items.map((it, idx) => (
-        <tr key={`${order.id}-${idx}`} className="border-b border-gray-100">
-          {idx === 0 && (
-            <td rowSpan={order.items.length}>
-              <div className="flex flex-col gap-1">
-                <CollapseToggle
-                  expanded={isOpen}
-                  onClick={onToggle}
-                  label="展开/收起明细"
-                />
-                {canRevert && <RevertButton href={revertHref} />}
-              </div>
-            </td>
-          )}
-          <td>{order.date.toISOString().slice(0, 10)}</td>
-          <td>{order.counterpartyName}</td>
-          <td>{it.yarnName}</td>
-          <td>{it.spec}</td>
-          <td>{it.color}</td>
-          <td>{it.unit}</td>
-          <td>{it.weight.toString()}</td>
-          <td>{it.amount.toString()}</td>
-          <td>{order.note ?? '-'}</td>
-        </tr>
-      ))}
-      {isOpen && (
-        <tr className="bg-gray-50">
-          <td colSpan={11} className="text-xs text-gray-600">
-            类型：{order.orderType === 'PURCHASE' ? '买入' : '卖出'} | 单号：{order.orderNo} |
-            仓库：{order.warehouseName} | 经办人：{order.handlerName} |
-            货款合计：{order.totalAmount.toString()} 元 | 运费：{order.freight.toString()} 元 |
-            备注：{order.note ?? '-'}
-          </td>
-        </tr>
-      )}
-    </>
+        return (
+          <Fragment key={order.id}>
+            <tr className="border-b last:border-b-0">
+              <td>
+                <button
+                  type="button"
+                  aria-expanded={expanded}
+                  aria-controls={detailsId}
+                  onClick={() => toggle(order.id)}
+                  className="inline-flex items-center gap-1 rounded font-medium text-blue-700 underline-offset-2 hover:underline focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2"
+                >
+                  <span aria-hidden="true" className="w-3 text-xs">
+                    {expanded ? '▼' : '▶'}
+                  </span>
+                  {order.orderNo}
+                </button>
+              </td>
+              <td>{order.counterpartyName}</td>
+              <td title={[...new Set(order.items.map((item) => item.spec))].join('、')}>
+                {summarize(order.items.map((item) => item.spec))}
+              </td>
+              <td title={[...new Set(order.items.map((item) => item.color))].join('、')}>
+                {summarize(order.items.map((item) => item.color))}
+              </td>
+              <td>{order.totalAmount}</td>
+            </tr>
+
+            {expanded ? (
+              <tr id={detailsId} className="border-b bg-slate-50">
+                <td colSpan={5} className="p-4">
+                  <div className="mb-3 flex flex-wrap items-start justify-between gap-3">
+                    <div className="grid flex-1 gap-x-6 gap-y-1 text-sm text-gray-700 sm:grid-cols-2 lg:grid-cols-4">
+                      <div>
+                        <span className="text-gray-500">类型：</span>
+                        {order.orderType === 'PURCHASE' ? '买入' : '卖出'}
+                      </div>
+                      <div><span className="text-gray-500">日期：</span>{order.date}</div>
+                      <div><span className="text-gray-500">往来单位：</span>{order.counterpartyName}</div>
+                      <div><span className="text-gray-500">仓库：</span>{order.warehouseName}</div>
+                      <div><span className="text-gray-500">经办人：</span>{order.handlerName}</div>
+                      <div><span className="text-gray-500">货款：</span>{order.totalAmount} 元</div>
+                      <div><span className="text-gray-500">运费：</span>{order.freight} 元</div>
+                      <div><span className="text-gray-500">备注：</span>{order.note || '无'}</div>
+                    </div>
+                    <div className="flex flex-wrap gap-2">
+                      {order.orderType === 'PURCHASE' ? (
+                        <LabelPrintButton
+                          order={{
+                            orderNo: order.orderNo,
+                            items: order.items.map((item) => ({
+                              yarnName: item.yarnName,
+                              spec: item.spec,
+                              color: item.color,
+                              packages: item.packages,
+                            })),
+                          }}
+                          label="补打标签"
+                          className="px-2 py-1 text-xs"
+                        />
+                      ) : null}
+                      {canRevert ? <RevertButton href={revertHref} label="撤回本单" /> : null}
+                    </div>
+                  </div>
+
+                  <div className="overflow-x-auto rounded border bg-white">
+                    <table className="w-full min-w-[780px] text-sm">
+                      <thead>
+                        <tr className="border-b bg-gray-50 text-left text-gray-600">
+                          {['品名', '支数', '色号', '单位', '批次', '重量', '单价', '金额', '包数'].map(
+                            (header) => (
+                              <th key={header} className="px-3 py-2 font-medium">{header}</th>
+                            ),
+                          )}
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {order.items.map((item, index) => (
+                          <tr key={`${order.id}-${index}`} className="border-b last:border-b-0">
+                            <td className="px-3 py-2">{item.yarnName}</td>
+                            <td className="px-3 py-2">{item.spec}</td>
+                            <td className="px-3 py-2">{item.color}</td>
+                            <td className="px-3 py-2">{item.unit}</td>
+                            <td className="px-3 py-2">{item.batchNo}</td>
+                            <td className="px-3 py-2">{item.weight}</td>
+                            <td className="px-3 py-2">{item.price}</td>
+                            <td className="px-3 py-2">{item.amount}</td>
+                            <td className="px-3 py-2">{item.packages ?? '-'}</td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                </td>
+              </tr>
+            ) : null}
+          </Fragment>
+        )
+      })}
+    </Table>
   )
 }

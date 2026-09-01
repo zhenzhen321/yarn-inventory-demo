@@ -1,15 +1,28 @@
-import { z } from 'zod'
+import { z, type RefinementCtx } from 'zod'
 
-export const handlerNameSchema = z.string().min(1, '经办人必填')
+export const handlerNameSchema = z.enum(['admin', 'clerk'])
+
+function rejectDuplicateInventoryItems(
+  items: { inventoryId: string }[],
+  ctx: RefinementCtx,
+): void {
+  const seen = new Set<string>()
+  items.forEach((item, index) => {
+    if (seen.has(item.inventoryId)) {
+      ctx.addIssue({ code: 'custom', path: [index, 'inventoryId'], message: '同一库存不能重复选择' })
+    }
+    seen.add(item.inventoryId)
+  })
+}
 
 export const loginSchema = z.object({
-  username: z.string().min(1, '请输入账号'),
-  password: z.string().min(1, '请输入密码'),
+  username: z.string().trim().min(1, '请输入账号').max(64, '账号过长'),
+  password: z.string().min(1, '请输入密码').max(256, '密码过长'),
   remember: z.boolean().optional().default(true),
 })
 
 export const yarnSchema = z.object({
-  name: z.string().min(1, '名称必填'),
+  name: z.string().trim().min(1, '名称必填'),
   note: z.string().optional().nullable(),
 })
 
@@ -48,6 +61,8 @@ export const processingReturnSchema = z.object({
   freight: z.coerce.number().nonnegative('运费不能为负').default(0),
   expectedSellPricePerKg: z.coerce.number().nonnegative('预计卖价不能为负').optional().nullable(),
   items: z.array(processingReturnItemSchema).min(1, '至少一条明细'),
+}).superRefine((value, ctx) => {
+  rejectDuplicateInventoryItems(value.items, ctx)
 })
 
 export const warehouseSchema = z.object({
@@ -113,6 +128,8 @@ export const saleSchema = z.object({
   note: z.string().optional().nullable(),
   freight: z.coerce.number().nonnegative('运费不能为负').default(0),
   items: z.array(saleItemSchema).min(1, '至少一条明细'),
+}).superRefine((value, ctx) => {
+  rejectDuplicateInventoryItems(value.items, ctx)
 })
 
 export const transferItemSchema = z.object({
@@ -130,6 +147,8 @@ export const transferSchema = z.object({
   processingFeePerKg: z.coerce.number().nonnegative('加工费不能为负').optional().nullable(),
   freight: z.coerce.number().nonnegative('运费不能为负').default(0),
   items: z.array(transferItemSchema).min(1, '至少一条明细'),
+}).superRefine((value, ctx) => {
+  rejectDuplicateInventoryItems(value.items, ctx)
 })
 
 export const stocktakeItemSchema = z.object({
@@ -143,6 +162,8 @@ export const stocktakeSchema = z.object({
   handlerName: handlerNameSchema,
   note: z.string().optional().nullable(),
   items: z.array(stocktakeItemSchema).min(1, '至少一条明细'),
+}).superRefine((value, ctx) => {
+  rejectDuplicateInventoryItems(value.items, ctx)
 })
 
 export const settlementSchema = z.object({
@@ -167,7 +188,7 @@ export const archiveZeroSchema = z.object({
 })
 
 export const yarnUpdateSchema = z.object({
-  name: z.string().min(1, '名称必填').optional(),
+  name: z.string().trim().min(1, '名称必填').optional(),
   note: z.string().nullable().optional(),
 })
 

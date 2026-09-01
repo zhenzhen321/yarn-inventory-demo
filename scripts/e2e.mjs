@@ -2,14 +2,11 @@
 // 登录 → 自建 E2E 测试数据（纱线/仓库/供应商/客户/买入）→ 卖出 → 调拨 → 盘库 → 结算 → 页面检查
 // 不依赖演示数据，也不会改动已有业务数据（只新增带 E2E 前缀的测试记录）
 // 用法：node scripts/e2e.mjs
-// 可用环境变量：E2E_BASE_URL（默认 http://localhost:3000）、E2E_USERNAME / E2E_PASSWORD、
-//               E2E_USERNAME2 / E2E_PASSWORD2（默认演示账号 admin / clerk）
 import { readFileSync } from 'node:fs'
 
 const base = process.env.E2E_BASE_URL || 'http://localhost:3000'
 const ts = Date.now()
 
-let e2eUsername = process.env.E2E_USERNAME || 'admin'
 let e2ePassword = process.env.E2E_PASSWORD
 if (!e2ePassword) {
   try {
@@ -20,7 +17,6 @@ if (!e2ePassword) {
 }
 const password = e2ePassword || 'demo123456'
 
-let admin2Username = process.env.E2E_USERNAME2 || 'clerk'
 let admin2Password = process.env.E2E_PASSWORD2
 if (!admin2Password) {
   try {
@@ -29,7 +25,6 @@ if (!admin2Password) {
     if (m) admin2Password = m[1]
   } catch {}
 }
-const password2 = admin2Password || 'demo123456'
 
 async function req(path, { method = 'GET', body, cookie, headers = {} } = {}) {
   const h = { 'Content-Type': 'application/json', ...headers }
@@ -56,7 +51,7 @@ function check(label, ok, extra = '') {
 
 const login = await req('/api/auth/login', {
   method: 'POST',
-  body: { username: e2eUsername, password },
+  body: { username: 'admin', password },
 })
 check('登录', login.status === 200)
 const cookie = login.setCookie.split(';')[0]
@@ -126,7 +121,7 @@ const purchase = await req('/api/purchases', {
     date: '2026-08-11',
     supplierId: supplier.json.id,
     warehouseId: whA.json.id,
-    handlerName: e2eUsername,
+    handlerName: 'admin',
     freight: 300,
     note: 'E2E备注',
     items: [{ yarnId: yarn.json.id, spec: '32支', color: buyColor, unit: 'kg', batchNo, weight: 1000, price: 20 }],
@@ -147,7 +142,7 @@ const sale = await req('/api/sales', {
     date: '2026-08-11',
     customerId: customer.json.id,
     warehouseId: whA.json.id,
-    handlerName: e2eUsername,
+    handlerName: 'admin',
     freight: 50,
     items: [{ inventoryId: row.id, weight: 100, price: 22, packages: 2 }],
   },
@@ -165,7 +160,7 @@ const transfer = await req('/api/transfers', {
     date: '2026-08-11',
     fromWarehouseId: whA.json.id,
     toWarehouseId: whB.json.id,
-    handlerName: e2eUsername,
+    handlerName: 'admin',
     items: [{ inventoryId: row.id, weight: 50 }],
   },
 })
@@ -208,7 +203,7 @@ const feeTransfer = await req('/api/transfers', {
     date: '2026-08-11',
     fromWarehouseId: whA.json.id,
     toWarehouseId: factory.json.id,
-    handlerName: e2eUsername,
+    handlerName: 'admin',
     freight: 80,
     items: [{ inventoryId: row.id, weight: 200 }],
   },
@@ -233,7 +228,7 @@ const blockOut = await req('/api/transfers', {
     date: '2026-08-11',
     fromWarehouseId: factory.json.id,
     toWarehouseId: whB.json.id,
-    handlerName: e2eUsername,
+    handlerName: 'admin',
     items: [{ inventoryId: frRow.id, weight: 10 }],
   },
 })
@@ -250,7 +245,7 @@ const blockSale = await req('/api/sales', {
     date: '2026-08-11',
     customerId: customer.json.id,
     warehouseId: factory.json.id,
-    handlerName: e2eUsername,
+    handlerName: 'admin',
     items: [{ inventoryId: frRow.id, weight: 10, price: 25 }],
   },
 })
@@ -267,7 +262,7 @@ const blockPr = await req('/api/processing-returns', {
     date: '2026-08-13',
     factoryId: factory.json.id,
     warehouseId: whA.json.id,
-    handlerName: e2eUsername,
+    handlerName: 'admin',
     freight: 50,
     items: [
       {
@@ -352,7 +347,7 @@ const feePay = await req('/api/processing-fee-payments', {
     amount: 100,
     date: '2026-08-14',
     method: '微信',
-    handlerName: e2eUsername,
+    handlerName: 'admin',
   },
 })
 check('加工费付款保存', feePay.status === 201, feePay.json?.error ?? feePay.text)
@@ -367,7 +362,7 @@ check(
 const overPay = await req('/api/processing-fee-payments', {
   method: 'POST',
   cookie,
-  body: { factoryId: factory.json.id, amount: 61, date: '2026-08-14', handlerName: e2eUsername },
+  body: { factoryId: factory.json.id, amount: 61, date: '2026-08-14', handlerName: 'admin' },
 })
 check(
   '加工费超付被拒',
@@ -393,7 +388,7 @@ const saleOut = await req('/api/sales', {
     date: '2026-08-13',
     customerId: customer.json.id,
     warehouseId: factory.json.id,
-    handlerName: e2eUsername,
+    handlerName: 'admin',
     items: [{ inventoryId: prRow.id, weight: 10, price: 25 }],
   },
 })
@@ -406,7 +401,7 @@ const transferOut = await req('/api/transfers', {
     date: '2026-08-13',
     fromWarehouseId: factory.json.id,
     toWarehouseId: whB.json.id,
-    handlerName: e2eUsername,
+    handlerName: 'admin',
     items: [{ inventoryId: prRow.id, weight: 70 }],
   },
 })
@@ -473,7 +468,7 @@ const stocktake = await req('/api/stocktakes', {
   body: {
     date: '2026-08-11',
     warehouseId: whA.json.id,
-    handlerName: admin2Username,
+    handlerName: 'clerk',
     items: [{ inventoryId: row.id, actualWeight: 0 }],
   },
 })
@@ -534,7 +529,7 @@ const settle1 = await req('/api/settlements', {
     amount: 10000,
     date: '2026-08-11',
     method: '银行转账',
-    handlerName: e2eUsername,
+    handlerName: 'admin',
   },
 })
 check('部分结算保存', settle1.status === 201)
@@ -553,7 +548,7 @@ const over = await req('/api/settlements', {
     counterpartyId: supplier.json.id,
     amount: 99999,
     date: '2026-08-11',
-    handlerName: e2eUsername,
+    handlerName: 'admin',
   },
 })
 check('超结拦截', over.status === 400 && over.json?.error?.includes('超过未结金额'), over.json?.error)
@@ -567,7 +562,7 @@ const discount = await req('/api/settlements', {
     amount: 500,
     date: '2026-08-12',
     method: '折让',
-    handlerName: admin2Username,
+    handlerName: 'clerk',
   },
 })
 check('折让结算保存', discount.status === 201, discount.json?.error ?? discount.text)
@@ -583,8 +578,29 @@ check(
 const sPage = await fetch(base + '/app/settlements', { headers: { Cookie: cookie } })
 const sHtml = await sPage.text()
 check('结算页可访问', sPage.status === 200 && sHtml.includes('资金结算'))
-check('结算页买入/卖出分开', sHtml.includes('应付供应商清单') && sHtml.includes('应收客户清单'))
-check('结算页含结算记录与去结算', sHtml.includes('结算记录') && sHtml.includes('去结算'))
+check(
+  '结算页含五个功能入口',
+  ['登记结算', '应付供应商', '应收客户', '加工费结算', '结算记录'].every((label) =>
+    sHtml.includes(label),
+  ),
+)
+const payablePage = await fetch(base + '/app/settlements/payables', { headers: { Cookie: cookie } })
+const payableHtml = await payablePage.text()
+check(
+  '应付页含供应商清单与去结算',
+  payablePage.status === 200 && payableHtml.includes('应付供应商') && payableHtml.includes('去结算'),
+)
+const receivablePage = await fetch(base + '/app/settlements/receivables', {
+  headers: { Cookie: cookie },
+})
+const receivableHtml = await receivablePage.text()
+check(
+  '应收页含客户清单与去结算',
+  receivablePage.status === 200 && receivableHtml.includes('应收客户') && receivableHtml.includes('去结算'),
+)
+const recordsPage = await fetch(base + '/app/settlements/records', { headers: { Cookie: cookie } })
+const recordsHtml = await recordsPage.text()
+check('结算记录页可访问', recordsPage.status === 200 && recordsHtml.includes('结算记录'))
 
 const revertVariantColor = `撤回-${ts}`
 const revertPo = await req('/api/purchases', {
@@ -594,7 +610,7 @@ const revertPo = await req('/api/purchases', {
     date: '2026-08-15',
     supplierId: supplier.json.id,
     warehouseId: whA.json.id,
-    handlerName: e2eUsername,
+    handlerName: 'admin',
     items: [
       {
         yarnId: yarn.json.id,
@@ -617,7 +633,7 @@ const revertSettle = await req('/api/settlements', {
     counterpartyId: supplier.json.id,
     amount: 3000,
     date: '2026-08-15',
-    handlerName: e2eUsername,
+    handlerName: 'admin',
   },
 })
 check('撤回测试结算保存', revertSettle.status === 201)
@@ -630,9 +646,9 @@ const settleRow = await pdb.settlement.findFirst({
 })
 const login2 = await req('/api/auth/login', {
   method: 'POST',
-  body: { username: admin2Username, password: password2 },
+  body: { username: 'clerk', password: admin2Password || 'demo123456' },
 })
-check('第二个账号登录成功', login2.status === 200)
+check('clerk登录成功', login2.status === 200)
 const cookie2 = login2.setCookie.split(';')[0]
 const forbidden = await req(`/api/settlements/${settleRow.id}`, { method: 'DELETE', cookie: cookie2 })
 check('非经办人撤回被拒(403)', forbidden.status === 403, forbidden.json?.error)
@@ -650,7 +666,7 @@ const revSale = await req('/api/sales', {
     date: '2026-08-15',
     customerId: customer.json.id,
     warehouseId: whA.json.id,
-    handlerName: e2eUsername,
+    handlerName: 'admin',
     items: [{ inventoryId: revRow.id, weight: 100, price: 22 }],
   },
 })

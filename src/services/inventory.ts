@@ -31,14 +31,27 @@ function dateYmd(d: Date): string {
 }
 
 async function nextOrderNo(
-  tx: Prisma.TransactionClient,
   prefix: string,
-  latest: () => Promise<{ orderNo: string } | null>,
+  existingForDay: (base: string) => Promise<{ orderNo: string }[]>,
 ): Promise<string> {
-  // 取现存最大单号的序号 + 1，避免撤回/删除单据后与现存单号撞号
-  const last = await latest()
-  const n = last ? Number(last.orderNo.slice(-4)) + 1 : 1
-  return `${prefix}-${dateYmd(new Date())}-${String(n).padStart(4, '0')}`
+  const base = `${prefix}-${dateYmd(new Date())}-`
+  const rows = await existingForDay(base)
+  const max = rows.reduce((current, row) => {
+    const suffix = row.orderNo.slice(base.length)
+    const value = /^\d+$/.test(suffix) ? Number(suffix) : 0
+    return Number.isSafeInteger(value) ? Math.max(current, value) : current
+  }, 0)
+  return `${base}${String(max + 1).padStart(4, '0')}`
+}
+
+function assertUniqueInventoryItems(items: { inventoryId: string }[]): void {
+  const seen = new Set<string>()
+  for (const item of items) {
+    if (seen.has(item.inventoryId)) {
+      throw new Error('同一库存不能重复选择，请合并为一条明细')
+    }
+    seen.add(item.inventoryId)
+  }
 }
 
 async function getOrCreateBatch(
@@ -125,6 +138,17 @@ async function mergeInventory(
 
 export async function createPurchase(db: PrismaClient, input: PurchaseInput) {
   return db.$transaction(async (tx) => {
+    const [supplier, warehouse] = await Promise.all([
+      tx.counterparty.findUnique({ where: { id: input.supplierId } }),
+      tx.warehouse.findUnique({ where: { id: input.warehouseId } }),
+    ])
+    if (!supplier?.active || !['SUPPLIER', 'BOTH'].includes(supplier.type)) {
+      throw new Error('供应商不存在、已停用或类型不正确')
+    }
+    if (!warehouse?.active || warehouse.type !== 'WAREHOUSE') {
+      throw new Error('入库仓库不存在、已停用或类型不正确')
+    }
+
     const totalAmount = input.items
       .reduce((sum, it) => sum.plus(amount(it.weight, it.price)), new Prisma.Decimal(0))
       .toDecimalPlaces(2)
@@ -139,8 +163,11 @@ export async function createPurchase(db: PrismaClient, input: PurchaseInput) {
 
     const order = await tx.purchaseOrder.create({
       data: {
-        orderNo: await nextOrderNo(tx, 'PO', () =>
-          tx.purchaseOrder.findFirst({ orderBy: { orderNo: 'desc' }, select: { orderNo: true } }),
+        orderNo: await nextOrderNo('PO', (base) =>
+          tx.purchaseOrder.findMany({
+            where: { orderNo: { startsWith: base } },
+            select: { orderNo: true },
+          }),
         ),
         date: input.date,
         supplierId: input.supplierId,
@@ -160,6 +187,9 @@ export async function createPurchase(db: PrismaClient, input: PurchaseInput) {
           })
         : await getOrCreateVariant(tx, it.yarnId!, it.spec!, it.color!, it.unit ?? 'kg')
       if (!variant) throw new Error(`纱线规格不存在：${it.variantId}`)
+      if (!variant.active || !variant.yarn.active) {
+        throw new Error('纱线或规格已停用，不能继续入库')
+      }
       const batch = await getOrCreateBatch(tx, variant, it.batchNo)
       const itemAmount = amount(it.weight, it.price)
       const itemFreight = unitBuyFreight.mul(it.weight).toDecimalPlaces(2)
@@ -213,6 +243,30 @@ export async function updatePurchaseFreight(db: PrismaClient, id: string, freigh
     if (totalWeight.lessThanOrEqualTo(0)) throw new Error('买入单没有有效重量')
     const newFreight = new Prisma.Decimal(freight).toDecimalPlaces(2)
     if (newFreight.lessThan(0)) throw new Error('运费不能为负')
+    const inventoryKeys = new Set(items.map((item) => `${item.variantId}|${item.batchId}`))
+    for (const key of inventoryKeys) {
+      const [variantId, batchId] = key.split('|')
+      const [row, purchased] = await Promise.all([
+        tx.inventory.findFirst({
+          where: {
+            warehouseId: order.warehouseId,
+            variantId,
+            batchId,
+            processingFeeSettled: false,
+            archived: false,
+          },
+        }),
+        tx.purchaseItem.aggregate({
+          where: { variantId, batchId, order: { warehouseId: order.warehouseId } },
+          _sum: { weight: true },
+        }),
+      ])
+      const totalPurchased = purchased._sum.weight ?? new Prisma.Decimal(0)
+      if (!row || !row.weight.equals(totalPurchased)) {
+        throw new Error('该买入单库存已发生卖出、调拨或盘点，不能再修改运费')
+      }
+    }
+
     const oldFreight = order.freight
     const allocate = (total: Prisma.Decimal) => {
       const arr = items.map((it) => total.mul(it.weight).div(totalWeight).toDecimalPlaces(2))
@@ -272,6 +326,16 @@ export interface SaleInput {
 
 export async function createSale(db: PrismaClient, input: SaleInput) {
   return db.$transaction(async (tx) => {
+    assertUniqueInventoryItems(input.items)
+    const [customer, warehouse] = await Promise.all([
+      tx.counterparty.findUnique({ where: { id: input.customerId } }),
+      tx.warehouse.findUnique({ where: { id: input.warehouseId } }),
+    ])
+    if (!customer?.active || !['CUSTOMER', 'BOTH'].includes(customer.type)) {
+      throw new Error('客户不存在、已停用或类型不正确')
+    }
+    if (!warehouse?.active) throw new Error('销售仓库不存在或已停用')
+
     const rows = await Promise.all(
       input.items.map((it) =>
         tx.inventory.findUnique({
@@ -305,8 +369,11 @@ export async function createSale(db: PrismaClient, input: SaleInput) {
 
     const order = await tx.saleOrder.create({
       data: {
-        orderNo: await nextOrderNo(tx, 'SO', () =>
-          tx.saleOrder.findFirst({ orderBy: { orderNo: 'desc' }, select: { orderNo: true } }),
+        orderNo: await nextOrderNo('SO', (base) =>
+          tx.saleOrder.findMany({
+            where: { orderNo: { startsWith: base } },
+            select: { orderNo: true },
+          }),
         ),
         date: input.date,
         customerId: input.customerId,
@@ -383,8 +450,16 @@ export interface TransferInput {
 
 export async function createTransfer(db: PrismaClient, input: TransferInput) {
   return db.$transaction(async (tx) => {
+    assertUniqueInventoryItems(input.items)
     if (input.fromWarehouseId === input.toWarehouseId) {
       throw new Error('来源仓库与目标仓库不能相同')
+    }
+    const [fromWarehouse, toWarehouse] = await Promise.all([
+      tx.warehouse.findUnique({ where: { id: input.fromWarehouseId } }),
+      tx.warehouse.findUnique({ where: { id: input.toWarehouseId } }),
+    ])
+    if (!fromWarehouse?.active || !toWarehouse?.active) {
+      throw new Error('来源仓库或目标仓库不存在或已停用')
     }
 
     const rows = await Promise.all(
@@ -415,8 +490,11 @@ export async function createTransfer(db: PrismaClient, input: TransferInput) {
 
     const order = await tx.transferOrder.create({
       data: {
-        orderNo: await nextOrderNo(tx, 'TO', () =>
-          tx.transferOrder.findFirst({ orderBy: { orderNo: 'desc' }, select: { orderNo: true } }),
+        orderNo: await nextOrderNo('TO', (base) =>
+          tx.transferOrder.findMany({
+            where: { orderNo: { startsWith: base } },
+            select: { orderNo: true },
+          }),
         ),
         date: input.date,
         fromWarehouseId: input.fromWarehouseId,
@@ -502,6 +580,7 @@ export interface StocktakeInput {
 
 export async function createStocktake(db: PrismaClient, input: StocktakeInput) {
   return db.$transaction(async (tx) => {
+    assertUniqueInventoryItems(input.items)
     const rows = await Promise.all(
       input.items.map((it) => tx.inventory.findUnique({ where: { id: it.inventoryId } })),
     )
@@ -515,8 +594,11 @@ export async function createStocktake(db: PrismaClient, input: StocktakeInput) {
 
     const stocktake = await tx.stocktake.create({
       data: {
-        orderNo: await nextOrderNo(tx, 'ST', () =>
-          tx.stocktake.findFirst({ orderBy: { orderNo: 'desc' }, select: { orderNo: true } }),
+        orderNo: await nextOrderNo('ST', (base) =>
+          tx.stocktake.findMany({
+            where: { orderNo: { startsWith: base } },
+            select: { orderNo: true },
+          }),
         ),
         date: input.date,
         warehouseId: input.warehouseId,
@@ -693,7 +775,7 @@ export async function settleProcessingFee(
         weight: remaining,
         cost: row.cost.minus(movedCost),
         freight: row.freight.minus(movedFreight),
-        ...(remaining.isZero() ? { processingFeeSettled: true } : {}),
+        ...(remaining.isZero() ? { processingFeeSettled: true, archived: true } : {}),
       },
     })
     await tx.processingFeeSettlement.create({
@@ -754,11 +836,16 @@ export interface ProcessingReturnInput {
 
 export async function createProcessingReturn(db: PrismaClient, input: ProcessingReturnInput) {
   return db.$transaction(async (tx) => {
+    assertUniqueInventoryItems(input.items)
     if (input.factoryId === input.warehouseId) throw new Error('加工厂与目标仓库不能相同')
     const factory = await tx.warehouse.findUnique({ where: { id: input.factoryId } })
     const warehouse = await tx.warehouse.findUnique({ where: { id: input.warehouseId } })
-    if (!factory || factory.type !== 'FACTORY') throw new Error('来源仓库必须是加工厂')
-    if (!warehouse || warehouse.type !== 'WAREHOUSE') throw new Error('目标仓库必须是普通仓库')
+    if (!factory || !factory.active || factory.type !== 'FACTORY') {
+      throw new Error('来源仓库必须是加工厂且处于启用状态')
+    }
+    if (!warehouse || !warehouse.active || warehouse.type !== 'WAREHOUSE') {
+      throw new Error('目标仓库必须是普通仓库且处于启用状态')
+    }
 
     const rows = await Promise.all(
       input.items.map((it) =>
@@ -790,8 +877,11 @@ export async function createProcessingReturn(db: PrismaClient, input: Processing
 
     const order = await tx.processingReturn.create({
       data: {
-        orderNo: await nextOrderNo(tx, 'PR', () =>
-          tx.processingReturn.findFirst({ orderBy: { orderNo: 'desc' }, select: { orderNo: true } }),
+        orderNo: await nextOrderNo('PR', (base) =>
+          tx.processingReturn.findMany({
+            where: { orderNo: { startsWith: base } },
+            select: { orderNo: true },
+          }),
         ),
         date: input.date,
         factoryId: input.factoryId,

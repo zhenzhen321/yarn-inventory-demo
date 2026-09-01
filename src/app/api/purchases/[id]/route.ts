@@ -6,7 +6,8 @@ import { logAudit } from '@/lib/audit'
 import { updatePurchaseFreight } from '@/services/inventory'
 import { revertPurchase } from '@/services/revert'
 
-export async function PATCH(req: Request, { params }: { params: { id: string } }) {
+export async function PATCH(req: Request, { params }: { params: Promise<{ id: string }> }) {
+  const { id } = await params
   const admin = await requireAdmin().catch(() => null)
   if (!admin) {
     return NextResponse.json({ error: '无权限：仅最高管理员可修改' }, { status: 403 })
@@ -20,7 +21,7 @@ export async function PATCH(req: Request, { params }: { params: { id: string } }
     )
   }
   try {
-    const order = await updatePurchaseFreight(prisma, params.id, parsed.data.freight)
+    const order = await updatePurchaseFreight(prisma, id, parsed.data.freight)
     await logAudit({
       userName: admin.name,
       action: 'PURCHASE_UPDATE',
@@ -37,19 +38,20 @@ export async function PATCH(req: Request, { params }: { params: { id: string } }
   }
 }
 
-export async function DELETE(_req: Request, { params }: { params: { id: string } }) {
+export async function DELETE(_req: Request, { params }: { params: Promise<{ id: string }> }) {
+  const { id } = await params
   const user = await getSessionUser()
   if (!user) return NextResponse.json({ error: '请先登录' }, { status: 401 })
   try {
     const order = await prisma.purchaseOrder.findUnique({
-      where: { id: params.id },
+      where: { id: id },
       include: { supplier: true },
     })
     if (!order) return NextResponse.json({ error: '买入单不存在' }, { status: 404 })
     if (user.name !== order.handlerName) {
       return NextResponse.json({ error: '无权限：只能撤回自己的记录' }, { status: 403 })
     }
-    await revertPurchase(prisma, params.id)
+    await revertPurchase(prisma, id)
     await logAudit({
       userName: user.name,
       action: 'PURCHASE_DELETE',
