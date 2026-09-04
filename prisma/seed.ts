@@ -22,19 +22,25 @@ function day(iso: string): Date {
 // 按外键依赖顺序清空业务数据，保证种子脚本可重复执行
 async function clearAll() {
   await prisma.processingFeePayment.deleteMany()
-  await prisma.processingFeeSettlement.deleteMany()
   await prisma.settlement.deleteMany()
+  await prisma.saleAllocation.deleteMany()
   await prisma.processingReturnItem.deleteMany()
   await prisma.processingReturn.deleteMany()
   await prisma.stocktakeItem.deleteMany()
   await prisma.stocktake.deleteMany()
   await prisma.saleItem.deleteMany()
   await prisma.saleOrder.deleteMany()
+  await prisma.processingInput.deleteMany()
+  await prisma.processingOutput.deleteMany()
+  await prisma.processingFeeSettlement.deleteMany()
+  await prisma.processingJob.deleteMany()
+  await prisma.stockMovement.deleteMany()
   await prisma.transferItem.deleteMany()
   await prisma.transferOrder.deleteMany()
   await prisma.purchaseItem.deleteMany()
   await prisma.purchaseOrder.deleteMany()
   await prisma.inventory.deleteMany()
+  await prisma.inventoryLot.deleteMany()
   await prisma.batch.deleteMany()
   await prisma.yarnVariant.deleteMany()
   await prisma.yarn.deleteMany()
@@ -89,13 +95,13 @@ async function main() {
   })
 
   const supplier = await prisma.counterparty.create({
-    data: { name: '江南纺织原料有限公司', type: 'SUPPLIER', contact: '陈经理', phone: '13800000001' },
+    data: { name: '江南纺织原料有限公司', type: 'SUPPLIER', contact: '陈经理', phone: '000-0000-0001' },
   })
   const customer = await prisma.counterparty.create({
-    data: { name: '沪上织造有限公司', type: 'CUSTOMER', contact: '刘总', phone: '13800000002' },
+    data: { name: '沪上织造有限公司', type: 'CUSTOMER', contact: '刘总', phone: '000-0000-0002' },
   })
   const both = await prisma.counterparty.create({
-    data: { name: '义乌针织经销部', type: 'BOTH', contact: '赵经理', phone: '13800000003' },
+    data: { name: '义乌针织经销部', type: 'BOTH', contact: '赵经理', phone: '000-0000-0003' },
   })
 
   const cotton = await prisma.yarn.create({ data: { name: '纯棉纱', note: '32支/40支现货' } })
@@ -183,7 +189,7 @@ async function main() {
     toWarehouseId: whWest.id,
     handlerName: 'admin',
     note: '调拨至城西仓周转',
-    items: [{ inventoryId: invCottonMain2.id, weight: 300 }],
+    items: [{ inventoryId: invCottonMain2.id, weight: 300, packages: 12 }],
   })
   await log(admin.id, 'admin', '仓库调拨', to1.orderNo, '纯棉纱 32支/本白 300kg 华东仓→城西仓')
 
@@ -196,7 +202,7 @@ async function main() {
     handlerName: 'admin',
     note: '送染厂改色',
     freight: 50,
-    items: [{ inventoryId: invPolyMain2.id, weight: 150 }],
+    items: [{ inventoryId: invPolyMain2.id, weight: 150, packages: 6 }],
   })
   await log(admin.id, 'admin', '送加工', to2.orderNo, '涤棉纱 32支/浅灰 150kg → 城南加工厂')
 
@@ -284,6 +290,18 @@ async function main() {
   })
   await log(admin.id, 'admin', '加工费付款', fp1.id, '城南加工厂 付款100')
 
+  // ---------- 同一供应商批号再次采购：形成新的内部批次 ----------
+  const po4 = await createPurchase(prisma, {
+    date: day('2026-08-16'),
+    supplierId: supplier.id,
+    warehouseId: whMain.id,
+    handlerName: 'admin',
+    note: '同供应商批号再次采购，用于展示独立成本层',
+    freight: 80,
+    items: [{ variantId: vCottonWhite.id, batchNo: 'C20260801', weight: 240, price: 22.3, packages: 10 }],
+  })
+  await log(admin.id, 'admin', '买入入库', po4.orderNo, '相同供应商批号生成新的内部批次 240kg @22.3')
+
   const summary = {
     users: await prisma.user.count(),
     warehouses: await prisma.warehouse.count(),
@@ -296,6 +314,10 @@ async function main() {
     returns: await prisma.processingReturn.count(),
     stocktakes: await prisma.stocktake.count(),
     settlements: await prisma.settlement.count(),
+    inventoryLots: await prisma.inventoryLot.count(),
+    stockMovements: await prisma.stockMovement.count(),
+    saleAllocations: await prisma.saleAllocation.count(),
+    processingJobs: await prisma.processingJob.count(),
     auditLogs: await prisma.auditLog.count(),
   }
   console.log('演示数据生成完成：')

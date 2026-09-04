@@ -17,12 +17,12 @@ export async function DELETE(_req: Request, { params }: { params: Promise<{ id: 
     if (user.name !== order.handlerName) {
       return NextResponse.json({ error: '无权限：只能撤回自己的记录' }, { status: 403 })
     }
-    await revertSale(prisma, id)
+    await revertSale(prisma, id, user.name)
     await logAudit({
       userName: user.name,
-      action: 'SALE_DELETE',
+      action: 'SALE_REVERSE',
       target: '撤回卖出',
-      detail: `撤回误操作卖出：单号 ${order.orderNo}，客户 ${order.customer.name}，货款 ${order.totalAmount}`,
+      detail: `保留原单并生成反向批次流水：单号 ${order.orderNo}，客户 ${order.customer.name}，货款 ${order.totalAmount}`,
     })
     return NextResponse.json({ ok: true })
   } catch (e) {

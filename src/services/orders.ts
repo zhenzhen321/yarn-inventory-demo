@@ -20,6 +20,9 @@ export interface OrderItemRecord {
   price: Prisma.Decimal
   amount: Prisma.Decimal
   packages: number | null
+  lotId: string | null
+  lotNo: string | null
+  scanCode: string | null
 }
 
 export interface OrderRecord {
@@ -33,6 +36,8 @@ export interface OrderRecord {
   totalAmount: Prisma.Decimal
   freight: Prisma.Decimal
   note: string | null
+  reversedAt: Date | null
+  reversedBy: string | null
   items: OrderItemRecord[]
 }
 
@@ -76,7 +81,7 @@ export async function getOrderRecords(
           include: {
             supplier: true,
             warehouse: true,
-            items: { include: { variant: { include: { yarn: true } }, batch: true } },
+            items: { include: { variant: { include: { yarn: true } }, batch: true, lot: true } },
           },
           orderBy: { date: 'desc' },
         }),
@@ -95,7 +100,10 @@ export async function getOrderRecords(
             warehouse: true,
             items: {
               include: {
-                inventory: { include: { variant: { include: { yarn: true } }, batch: true } },
+                inventory: {
+                  include: { variant: { include: { yarn: true } }, batch: true, lot: true },
+                },
+                allocations: { include: { lot: true } },
               },
             },
           },
@@ -116,6 +124,8 @@ export async function getOrderRecords(
       totalAmount: o.totalAmount,
       freight: o.freight,
       note: o.note,
+      reversedAt: o.reversedAt,
+      reversedBy: o.reversedBy,
       items: o.items.map((it) => ({
         yarnName: it.variant.yarn.name,
         spec: it.variant.spec,
@@ -126,6 +136,9 @@ export async function getOrderRecords(
         price: it.price,
         amount: it.amount,
         packages: it.packages,
+        lotId: it.lot?.id ?? null,
+        lotNo: it.lot?.lotNo ?? null,
+        scanCode: it.lot?.scanCode ?? null,
       })),
     })
   }
@@ -141,17 +154,25 @@ export async function getOrderRecords(
       totalAmount: o.totalAmount,
       freight: o.freight,
       note: o.note,
-      items: o.items.map((it) => ({
-        yarnName: it.inventory.variant.yarn.name,
-        spec: it.inventory.variant.spec,
-        color: it.inventory.variant.color,
-        unit: it.inventory.variant.unit,
-        batchNo: it.inventory.batch.batchNo,
-        weight: it.weight,
-        price: it.price,
-        amount: it.amount,
-        packages: it.packages,
-      })),
+      reversedAt: o.reversedAt,
+      reversedBy: o.reversedBy,
+      items: o.items.map((it) => {
+        const lot = it.allocations[0]?.lot ?? it.inventory.lot
+        return {
+          yarnName: it.inventory.variant.yarn.name,
+          spec: it.inventory.variant.spec,
+          color: it.inventory.variant.color,
+          unit: it.inventory.variant.unit,
+          batchNo: it.inventory.batch.batchNo,
+          weight: it.weight,
+          price: it.price,
+          amount: it.amount,
+          packages: it.packages,
+          lotId: lot?.id ?? null,
+          lotNo: lot?.lotNo ?? null,
+          scanCode: lot?.scanCode ?? null,
+        }
+      }),
     })
   }
   rows.sort((a, b) => b.date.getTime() - a.date.getTime())

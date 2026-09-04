@@ -7,7 +7,7 @@ export default async function NewTransferPage() {
     prisma.warehouse.findMany({ where: { active: true }, orderBy: { name: 'asc' } }),
     prisma.inventory.findMany({
       where: { weight: { gt: 0 } },
-      include: { warehouse: true, variant: { include: { yarn: true } }, batch: true },
+      include: { warehouse: true, variant: { include: { yarn: true } }, batch: true, lot: true },
       orderBy: [{ warehouse: { name: 'asc' } }, { variant: { yarn: { name: 'asc' } } }],
     }),
   ])
@@ -27,7 +27,9 @@ export default async function NewTransferPage() {
           color: r.variant.color,
           unit: r.variant.unit,
           batchNo: r.batch.batchNo,
+          lotNo: r.lot?.lotNo ?? null,
           weight: r.weight.toString(),
+          packages: r.packages,
           processingFeeSettled: r.processingFeeSettled,
         }))}
       />

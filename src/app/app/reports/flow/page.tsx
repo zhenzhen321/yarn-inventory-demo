@@ -2,6 +2,7 @@ import { prisma } from '@/lib/prisma'
 import { ReportPageHeader } from '@/components/reports/ReportPageHeader'
 import { Table } from '@/components/ui/Table'
 import { getRecentFlow } from '@/services/reports'
+import { OrderTraceLink } from '@/components/orders/OrderTraceLink'
 
 export default async function RecentFlowReportPage() {
   const flow = await getRecentFlow(prisma, 30)
@@ -16,7 +17,7 @@ export default async function RecentFlowReportPage() {
         {flow.map((record) => (
           <tr key={record.type + '-' + record.orderNo}>
             <td>{record.type === 'PURCHASE' ? '买入' : '卖出'}</td>
-            <td>{record.orderNo}</td>
+            <td><OrderTraceLink orderNo={record.orderNo} orderType={record.type} /></td>
             <td>{record.date.toISOString().slice(0, 10)}</td>
             <td>{record.counterpartyName}</td>
             <td>{record.warehouseName}</td>

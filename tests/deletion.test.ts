@@ -111,7 +111,14 @@ describe('删除安全检测', () => {
       items: [{ inventoryId: rows[0].id, weight: 100 }],
     })
     const factoryRows = await getInventoryRows(db, { warehouseId: factory.id })
-    await settleProcessingFee(db, factoryRows[0].id, { feePerKg: 2 })
+    await settleProcessingFee(db, factoryRows[0].id, {
+      feePerKg: 2,
+      spec: '20支',
+      color: '紫色',
+      unit: 'kg',
+      batchNo: 'P-001',
+      outputWeight: 80,
+    })
     const settledRows = await getInventoryRows(db, { warehouseId: factory.id })
     const settledRow = settledRows.find((r) => r.processingFeeSettled)!
     const ret = await createProcessingReturn(db, {
@@ -122,12 +129,12 @@ describe('删除安全检测', () => {
       items: [
         {
           inventoryId: settledRow.id,
-          weight: 100,
+          weight: 80,
           spec: '20支',
           color: '紫色',
           unit: 'kg',
           batchNo: 'P-001',
-          outputWeight: 800,
+          outputWeight: 80,
         },
       ],
     })

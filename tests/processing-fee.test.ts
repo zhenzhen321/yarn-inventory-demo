@@ -59,6 +59,16 @@ describe('结算加工费', () => {
     expect(zeroed.cost.toString()).toBe('0')
     expect(zeroed.processingFeeSettled).toBe(true)
     expect(zeroed.archived).toBe(true)
+    expect(r.outputLot.sourceType).toBe('PROCESSING')
+    expect(r.outputLot.id).not.toBe(r.inputLot.id)
+    const job = await db.processingJob.findUniqueOrThrow({
+      where: { id: r.job.id },
+      include: { inputs: true, outputs: true, feeSettlement: true },
+    })
+    expect(job.inputs[0].lotId).toBe(r.inputLot.id)
+    expect(job.outputs[0].lotId).toBe(r.outputLot.id)
+    expect(job.weightDiff.toString()).toBe('0')
+    expect(job.feeSettlement?.feeTotal.toString()).toBe('200')
   })
 
   it('非加工厂/重复结算均拦截', async () => {
@@ -78,7 +88,7 @@ describe('结算加工费', () => {
     const s = await setupFactory()
     await settleProcessingFee(db, s.factoryRow.id, { feePerKg: 2 })
     await expect(settleProcessingFee(db, s.factoryRow.id, { feePerKg: 1 })).rejects.toThrow(
-      '已结算过加工费',
+      '已完成加工核算',
     )
   })
 
@@ -196,7 +206,7 @@ describe('结算加工费', () => {
     expect(newRow.variant.spec).toBe('20支')
   })
 
-  it('多次部分结算：已算行累加、剩余递减、加工费显示最近一次', async () => {
+  it('多次部分完工：每次生成独立成品批次，原料剩余递减', async () => {
     const s = await setupFactory(400)
     await settleProcessingFee(db, s.factoryRow.id, { feePerKg: 2, inputWeight: 100 })
     await settleProcessingFee(db, s.factoryRow.id, { feePerKg: 3, inputWeight: 150 })
@@ -207,11 +217,13 @@ describe('结算加工费', () => {
     expect(source.cost.toString()).toBe('3000')
     expect(source.freight.toString()).toBe('30')
     expect(source.processingFeeSettled).toBe(false)
-    expect(settled).toHaveLength(1)
-    expect(settled[0].weight.toString()).toBe('250')
-    expect(settled[0].cost.toString()).toBe('5650')
-    expect(settled[0].freight.toString()).toBe('50')
-    expect(settled[0].processingFeePerKg?.toString()).toBe('3')
+    expect(settled).toHaveLength(2)
+    expect(settled.map((row) => row.weight.toString()).sort()).toEqual(['100', '150'])
+    expect(settled.map((row) => row.cost.toString()).sort()).toEqual(['2200', '3450'])
+    expect(settled.map((row) => row.freight.toString()).sort()).toEqual(['20', '30'])
+    expect(new Set(settled.map((row) => row.lotId)).size).toBe(2)
+    expect(await db.processingJob.count()).toBe(2)
+    expect(await db.processingFeeSettlement.count()).toBe(2)
   })
 
   it('拦截：本次加工重量为 0 或超过库存；加工后重量必须大于 0', async () => {

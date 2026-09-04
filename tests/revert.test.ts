@@ -61,14 +61,14 @@ describe('撤回买入', () => {
       ],
     })
     await revertPurchase(db, order.id)
-    const rows = await getInventoryRows(db, { warehouseId: base.warehouseA, includeZero: true })
-    const f1 = rows.find((r) => r.batch.batchNo === 'F1')
-    const f2 = rows.find((r) => r.batch.batchNo === 'F2')
-    expect(f1?.weight.toString()).toBe('0')
-    expect(f1?.cost.toString()).toBe('0')
-    expect(f1?.freight.toString()).toBe('0')
-    expect(f2?.weight.toString()).toBe('0')
-    expect(await db.purchaseOrder.count()).toBe(0)
+    const rows = await db.inventory.findMany({ where: { warehouseId: base.warehouseA } })
+    expect(rows).toHaveLength(2)
+    expect(rows.every((row) => row.archived && row.weight.isZero())).toBe(true)
+    expect(rows.every((row) => row.cost.isZero() && row.freight.isZero())).toBe(true)
+    const preserved = await db.purchaseOrder.findUniqueOrThrow({ where: { id: order.id } })
+    expect(preserved.reversedAt).toBeTruthy()
+    expect(await db.purchaseOrder.count()).toBe(1)
+    expect(await db.stockMovement.count({ where: { type: 'REVERSAL' } })).toBe(2)
   })
 
   it('同批次存在归档行时撤回新买入只扣活动行', async () => {
@@ -105,8 +105,8 @@ describe('撤回买入', () => {
     })
     expect(allRows).toHaveLength(2)
     expect(allRows.every((row) => row.weight.toString() === '0')).toBe(true)
-    expect(allRows.find((row) => row.archived)?.cost.toString()).toBe('0')
-    expect(allRows.find((row) => !row.archived)?.cost.toString()).toBe('0')
+    expect(allRows.every((row) => row.archived)).toBe(true)
+    expect(allRows.every((row) => row.cost.toString() === '0')).toBe(true)
   })
 
   it('货已被卖出则禁止撤回', async () => {
@@ -126,7 +126,9 @@ describe('撤回买入', () => {
       handlerName: 'admin',
       items: [{ inventoryId: rows[0].id, weight: 100, price: 22 }],
     })
-    await expect(revertPurchase(db, order.id)).rejects.toThrow('已被卖出/调走')
+    await expect(revertPurchase(db, order.id)).rejects.toThrow(
+      '已被卖出、调拨、加工或盘点',
+    )
   })
 
   it('撤回后供应商已付超过应付则禁止', async () => {
@@ -199,7 +201,10 @@ describe('撤回卖出', () => {
     rows = await getInventoryRows(db, { warehouseId: base.warehouseA })
     expect(rows[0].weight.toString()).toBe('1000')
     expect(rows[0].cost.toString()).toBe('20000')
-    expect(await db.saleOrder.count()).toBe(0)
+    const preserved = await db.saleOrder.findUniqueOrThrow({ where: { id: sale.id } })
+    expect(preserved.reversedAt).toBeTruthy()
+    expect(await db.saleOrder.count()).toBe(1)
+    expect(await db.stockMovement.count({ where: { type: 'REVERSAL' } })).toBe(1)
   })
 
   it('撤回后客户已收超过应收则禁止', async () => {

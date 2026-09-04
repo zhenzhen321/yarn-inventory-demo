@@ -119,7 +119,14 @@ describe('加工收回后的库存金额', () => {
       items: [{ inventoryId: rows[0].id, weight: 100 }],
     })
     const factoryRows = await getInventoryRows(db, { warehouseId: factory.id })
-    await settleProcessingFee(db, factoryRows[0].id, { feePerKg: 2 })
+    await settleProcessingFee(db, factoryRows[0].id, {
+      feePerKg: 2,
+      spec: '20支',
+      color: '紫色',
+      unit: 'kg',
+      batchNo: 'P-001',
+      outputWeight: 80,
+    })
     const settledRows = await getInventoryRows(db, { warehouseId: factory.id })
     const settledRow = settledRows.find((r) => r.processingFeeSettled)!
     await createProcessingReturn(db, {
@@ -130,17 +137,17 @@ describe('加工收回后的库存金额', () => {
       items: [
         {
           inventoryId: settledRow.id,
-          weight: 100,
+          weight: 80,
           spec: '20支',
           color: '紫色',
           unit: 'kg',
           batchNo: 'P-001',
-          outputWeight: 800,
+          outputWeight: 80,
         },
       ],
     })
     const valuation = await getInventoryValuation(db)
-    expect(valuation[0].value.toString()).toBe('2200')
+    expect(valuation[0].value.toString()).toBe('2160')
   })
 })
 
@@ -169,7 +176,14 @@ describe('卖光加工收回批次后的毛利', () => {
     })
     // 收回 400kg 紫色，运费 150（染色费先在库存页按 5 元/kg 结算）
     const factoryRows = await getInventoryRows(db, { warehouseId: factory.id })
-    await settleProcessingFee(db, factoryRows[0].id, { feePerKg: 5 })
+    await settleProcessingFee(db, factoryRows[0].id, {
+      feePerKg: 5,
+      spec: '20支',
+      color: '紫色',
+      unit: 'kg',
+      batchNo: 'P-001',
+      outputWeight: 400,
+    })
     const settledRows = await getInventoryRows(db, { warehouseId: factory.id })
     const settledRow = settledRows.find((r) => r.processingFeeSettled)!
     await createProcessingReturn(db, {
@@ -181,7 +195,7 @@ describe('卖光加工收回批次后的毛利', () => {
       items: [
         {
           inventoryId: settledRow.id,
-          weight: 500,
+          weight: 400,
           spec: '20支',
           color: '紫色',
           unit: 'kg',
@@ -202,10 +216,10 @@ describe('卖光加工收回批次后的毛利', () => {
       items: [{ inventoryId: purple.id, weight: 400, price: 40 }],
     })
     const profit = await getProfitEstimate(db)
-    // 已结算加工费后成本 12500（10000 + 5×500）；新单位成本 31.25 × 400 = 12500；新单位运费 1.51 × 400 = 604；卖单运费 200
-    // 毛利 = 16000 − 12500 − 604 − 200 = 2696
-    expect(profit.estimatedCost.toString()).toBe('12500')
-    expect(profit.estimatedFreight.toString()).toBe('604')
-    expect(profit.estimatedProfit.toString()).toBe('2696')
+    // 完工成本 12000（原料 10000 + 5×成品400）；既有运费450 + 回程150 = 600。
+    // 毛利 = 16000 − 12000 − 600 − 200 = 3200
+    expect(profit.estimatedCost.toString()).toBe('12000')
+    expect(profit.estimatedFreight.toString()).toBe('600')
+    expect(profit.estimatedProfit.toString()).toBe('3200')
   })
 })

@@ -11,7 +11,7 @@ export default async function NewSalePage() {
     }),
     prisma.inventory.findMany({
       where: { weight: { gt: 0 } },
-      include: { warehouse: true, variant: { include: { yarn: true } }, batch: true },
+      include: { warehouse: true, variant: { include: { yarn: true } }, batch: true, lot: true },
       orderBy: [{ warehouse: { name: 'asc' } }, { variant: { yarn: { name: 'asc' } } }],
     }),
   ])
@@ -32,7 +32,10 @@ export default async function NewSalePage() {
           color: r.variant.color,
           unit: r.variant.unit,
           batchNo: r.batch.batchNo,
+          lotNo: r.lot?.lotNo ?? null,
+          scanCode: r.lot?.scanCode ?? null,
           weight: r.weight.toString(),
+          packages: r.packages,
           processingFeeSettled: r.processingFeeSettled,
         }))}
       />

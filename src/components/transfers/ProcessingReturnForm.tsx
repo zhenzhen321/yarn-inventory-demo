@@ -21,7 +21,9 @@ interface FactoryRow {
   color: string
   unit: string
   batchNo: string
+  lotNo: string | null
   weight: string
+  packages: number | null
   cost: string
   freight: string
   processingFeeSettled: boolean
@@ -30,24 +32,10 @@ interface FactoryRow {
 interface Row {
   inventoryId: string
   weight: string
-  spec: string
-  color: string
-  unit: string
-  batchNo: string
-  outputWeight: string
   packages: string
 }
 
-const emptyRow = (): Row => ({
-  inventoryId: '',
-  weight: '',
-  spec: '',
-  color: '',
-  unit: 'kg',
-  batchNo: '',
-  outputWeight: '',
-  packages: '',
-})
+const emptyRow = (): Row => ({ inventoryId: '', weight: '', packages: '' })
 
 export function ProcessingReturnForm({
   factories,
@@ -68,56 +56,51 @@ export function ProcessingReturnForm({
   const [savedOrderNo, setSavedOrderNo] = useState('')
 
   const available = factoryRows.filter(
-    (r) => r.warehouseId === factoryId && r.processingFeeSettled,
+    (row) => row.warehouseId === factoryId && row.processingFeeSettled,
   )
 
-  function updateRow(idx: number, key: keyof Row, value: string) {
-    setRows((prev) =>
-      prev.map((r, i) => {
-        if (i !== idx) return r
-        const next = { ...r, [key]: value }
-        if (key === 'inventoryId') {
-          const src = factoryRows.find((f) => f.id === value)
-          if (src) next.weight = src.weight
+  function updateRow(index: number, key: keyof Row, value: string) {
+    setRows((current) =>
+      current.map((row, rowIndex) => {
+        if (rowIndex !== index) return row
+        if (key !== 'inventoryId') return { ...row, [key]: value }
+        const source = available.find((candidate) => candidate.id === value)
+        return {
+          inventoryId: value,
+          weight: source?.weight ?? '',
+          packages: source?.packages?.toString() ?? '',
         }
-        return next
       }),
     )
   }
 
-  function preview(idx: number): string | null {
-    const r = rows[idx]
-    const src = factoryRows.find((f) => f.id === r.inventoryId)
-    const w = resolveNumeric(r.weight)
-    const out = resolveNumeric(r.outputWeight)
-    if (!src || w === null || out === null || w <= 0 || out <= 0) return null
-    const movedCost = (Number(src.cost) * w) / Number(src.weight)
-    const unitCost = movedCost / out
-    return unitCost.toFixed(2)
-  }
-
-  async function onSubmit(e: FormEvent<HTMLFormElement>) {
-    e.preventDefault()
+  async function onSubmit(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault()
     setMessage('')
-    const form = new FormData(e.currentTarget)
+    const form = new FormData(event.currentTarget)
     const body = {
       date: String(form.get('date') ?? new Date().toISOString().slice(0, 10)),
       factoryId,
       warehouseId: String(form.get('warehouseId')),
       handlerName: String(form.get('handlerName')),
       note: String(form.get('note') ?? '') || null,
+      processingFeePerKg: 0,
       freight: Number(form.get('freight') ?? 0),
       expectedSellPricePerKg: expectedSellPrice ? Number(expectedSellPrice) : null,
-      items: rows.map((r) => ({
-        inventoryId: r.inventoryId,
-        weight: resolveNumeric(r.weight) ?? Number(r.weight),
-        spec: r.spec,
-        color: r.color,
-        unit: r.unit,
-        batchNo: r.batchNo,
-        outputWeight: resolveNumeric(r.outputWeight) ?? Number(r.outputWeight),
-        packages: r.packages ? Number(r.packages) : null,
-      })),
+      items: rows.map((row) => {
+        const source = factoryRows.find((candidate) => candidate.id === row.inventoryId)
+        const weight = resolveNumeric(row.weight) ?? Number(row.weight)
+        return {
+          inventoryId: row.inventoryId,
+          weight,
+          spec: source?.spec ?? '',
+          color: source?.color ?? '',
+          unit: source?.unit ?? 'kg',
+          batchNo: source?.batchNo ?? '',
+          outputWeight: weight,
+          packages: row.packages ? Number(row.packages) : null,
+        }
+      }),
     }
     const res = await fetch('/api/processing-returns', {
       method: 'POST',
@@ -138,41 +121,32 @@ export function ProcessingReturnForm({
 
   return (
     <form onSubmit={onSubmit} className="space-y-4">
+      <div className="rounded-lg border border-blue-200 bg-blue-50 p-3 text-sm text-blue-950">
+        这里仅把已经完工核算的成品批次从加工厂移回仓库，不再重新称重或重复计加工费。
+        如果加工完直接卖出，请到“卖出出库”选择加工厂并扫描成品标签。
+      </div>
       <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
         <label className="text-sm">
           日期
-          <Input
-            type="date"
-            name="date"
-            required
-            defaultValue={new Date().toISOString().slice(0, 10)}
-          />
+          <Input type="date" name="date" required defaultValue={new Date().toISOString().slice(0, 10)} />
         </label>
         <label className="text-sm">
           来源加工厂
           <Select
             value={factoryId}
-            onChange={(e) => {
-              setFactoryId(e.target.value)
+            onChange={(event) => {
+              setFactoryId(event.target.value)
               setRows([emptyRow()])
             }}
             required
           >
-            {factories.map((w) => (
-              <option key={w.id} value={w.id}>
-                {w.name}（加工厂）
-              </option>
-            ))}
+            {factories.map((factory) => <option key={factory.id} value={factory.id}>{factory.name}（加工厂）</option>)}
           </Select>
         </label>
         <label className="text-sm">
           目标仓库
           <Select name="warehouseId" required>
-            {warehouses.map((w) => (
-              <option key={w.id} value={w.id}>
-                {w.name}
-              </option>
-            ))}
+            {warehouses.map((warehouse) => <option key={warehouse.id} value={warehouse.id}>{warehouse.name}</option>)}
           </Select>
         </label>
         <label className="text-sm">
@@ -188,14 +162,7 @@ export function ProcessingReturnForm({
         </label>
         <label className="text-sm">
           预计卖价 (元/kg，选填)
-          <Input
-            type="number"
-            step="0.01"
-            min="0"
-            value={expectedSellPrice}
-            onChange={(e) => setExpectedSellPrice(e.target.value)}
-            placeholder="用于预计毛利"
-          />
+          <Input type="number" step="0.01" min="0" value={expectedSellPrice} onChange={(event) => setExpectedSellPrice(event.target.value)} />
         </label>
         <label className="text-sm">
           备注
@@ -203,80 +170,34 @@ export function ProcessingReturnForm({
         </label>
       </div>
 
-      {rows.map((row, idx) => (
-        <div
-          key={idx}
-          className="grid gap-3 rounded border bg-white p-3 sm:grid-cols-2 lg:grid-cols-8"
-        >
-          <Select
-            value={row.inventoryId}
-            onChange={(e) => updateRow(idx, 'inventoryId', e.target.value)}
-            required
-          >
-            <option value="">选择加工厂库存</option>
-            {available.map((r) => (
-              <option key={r.id} value={r.id}>
-                {r.yarnName} {r.spec} {r.color} {r.unit} 批次{r.batchNo}（
-                {Number(r.weight).toFixed(2)} kg）
-              </option>
-            ))}
-          </Select>
-          <ExpressionInput
-            value={row.weight}
-            onChange={(v) => updateRow(idx, 'weight', v)}
-            placeholder="送厂重量 kg*"
-            required
-          />
-          <Input
-            value={row.spec}
-            onChange={(e) => updateRow(idx, 'spec', e.target.value)}
-            placeholder="新支数（如 20支）*"
-            required
-          />
-          <Input
-            value={row.color}
-            onChange={(e) => updateRow(idx, 'color', e.target.value)}
-            placeholder="新色号（如 紫色）*"
-            required
-          />
-          <Input
-            value={row.unit}
-            onChange={(e) => updateRow(idx, 'unit', e.target.value)}
-            placeholder="单位"
-            required
-          />
-          <Input
-            value={row.batchNo}
-            onChange={(e) => updateRow(idx, 'batchNo', e.target.value)}
-            placeholder="新批次/缸号*"
-            required
-          />
-          <ExpressionInput
-            value={row.outputWeight}
-            onChange={(v) => updateRow(idx, 'outputWeight', v)}
-            placeholder="收回重量 kg*"
-            required
-          />
-          <Button
-            type="button"
-            onClick={() => setRows((prev) => prev.filter((_, i) => i !== idx))}
-            className="bg-red-600 hover:bg-red-700"
-          >
-            删除
-          </Button>
-          {preview(idx) && (
-            <p className="text-xs text-gray-600 sm:col-span-2 lg:col-span-8">
-              该行预计新单位成本：¥{preview(idx)} / kg
-            </p>
-          )}
-        </div>
-      ))}
-      <Button type="button" onClick={() => setRows((prev) => [...prev, emptyRow()])}>
-        加一行
-      </Button>
+      {rows.map((row, index) => {
+        const source = available.find((candidate) => candidate.id === row.inventoryId)
+        const weight = resolveNumeric(row.weight) ?? 0
+        const unitCost = source && weight > 0 ? Number(source.cost) / Number(source.weight) : null
+        return (
+          <div key={index} className="grid gap-3 rounded border bg-white p-3 sm:grid-cols-2 lg:grid-cols-5">
+            <Select value={row.inventoryId} onChange={(event) => updateRow(index, 'inventoryId', event.target.value)} required>
+              <option value="">选择已完工成品批次</option>
+              {available.map((candidate) => (
+                <option key={candidate.id} value={candidate.id}>
+                  {candidate.yarnName} {candidate.spec} {candidate.color} · {candidate.lotNo ?? '历史批次'} · {Number(candidate.weight).toFixed(2)} kg / {candidate.packages ?? '-'} 件
+                </option>
+              ))}
+            </Select>
+            <ExpressionInput value={row.weight} onChange={(value) => updateRow(index, 'weight', value)} placeholder="返仓重量 kg*" required />
+            <Input type="number" step="1" min="0" value={row.packages} onChange={(event) => updateRow(index, 'packages', event.target.value)} placeholder="返仓件数" />
+            <div className="self-center text-sm text-gray-600">
+              {source ? `批次/缸号 ${source.batchNo}` : '选择后自动保持原批次'}
+              {unitCost !== null ? ` · 成本 ¥${unitCost.toFixed(2)}/kg` : ''}
+            </div>
+            <Button type="button" onClick={() => setRows((current) => current.filter((_, rowIndex) => rowIndex !== index))} className="bg-red-600 hover:bg-red-700">删除</Button>
+          </div>
+        )
+      })}
+      <Button type="button" onClick={() => setRows((current) => [...current, emptyRow()])}>加一行</Button>
       {savedOrderNo && <p className="text-sm text-green-600">保存成功，单号：{savedOrderNo}</p>}
       {message && <p className="text-sm text-red-600">{message}</p>}
-      <Button type="submit">保存加工收回单</Button>
+      <Button type="submit">保存成品返仓单</Button>
     </form>
   )
 }

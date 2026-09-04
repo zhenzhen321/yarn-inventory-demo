@@ -22,7 +22,9 @@ interface InventoryRow {
   color: string | null
   unit: string
   batchNo: string
+  lotNo: string | null
   weight: string
+  packages: number | null
   processingFeeSettled: boolean
 }
 
@@ -42,8 +44,8 @@ export function TransferForm({
   const [toWarehouseId, setToWarehouseId] = useState(
     destinations[1]?.id ?? destinations[0]?.id ?? '',
   )
-  const [rows, setRows] = useState<{ inventoryId: string; weight: string }[]>([
-    { inventoryId: '', weight: '' },
+  const [rows, setRows] = useState<{ inventoryId: string; weight: string; packages: string }[]>([
+    { inventoryId: '', weight: '', packages: '' },
   ])
   const [message, setMessage] = useState('')
   const [savedOrderNo, setSavedOrderNo] = useState('')
@@ -73,6 +75,7 @@ export function TransferForm({
       items: rows.map((r) => ({
         inventoryId: r.inventoryId,
         weight: resolveNumeric(r.weight) ?? Number(r.weight),
+        packages: r.packages ? Number(r.packages) : null,
       })),
     }
     const res = await fetch('/api/transfers', {
@@ -83,7 +86,7 @@ export function TransferForm({
     if (res.ok) {
       const data = await res.json()
       setSavedOrderNo(data.orderNo)
-      setRows([{ inventoryId: '', weight: '' }])
+      setRows([{ inventoryId: '', weight: '', packages: '' }])
       router.refresh()
     } else {
       const data = await res.json().catch(() => ({}))
@@ -109,7 +112,7 @@ export function TransferForm({
             value={fromWarehouseId}
             onChange={(e) => {
               setFromWarehouseId(e.target.value)
-              setRows([{ inventoryId: '', weight: '' }])
+              setRows([{ inventoryId: '', weight: '', packages: '' }])
             }}
             required
           >
@@ -155,13 +158,22 @@ export function TransferForm({
       {rows.map((row, idx) => (
         <div
           key={idx}
-          className="grid gap-3 rounded border bg-white p-3 sm:grid-cols-2 lg:grid-cols-4"
+          className="grid gap-3 rounded border bg-white p-3 sm:grid-cols-2 lg:grid-cols-5"
         >
           <Select
             value={row.inventoryId}
             onChange={(e) =>
               setRows((prev) =>
-                prev.map((r, i) => (i === idx ? { ...r, inventoryId: e.target.value } : r)),
+                prev.map((r, i) => {
+                  if (i !== idx) return r
+                  const source = available.find((candidate) => candidate.id === e.target.value)
+                  return {
+                    ...r,
+                    inventoryId: e.target.value,
+                    weight: source?.weight ?? '',
+                    packages: source?.packages?.toString() ?? '',
+                  }
+                }),
               )
             }
             required
@@ -169,7 +181,7 @@ export function TransferForm({
             <option value="">选择库存</option>
             {available.map((r) => (
               <option key={r.id} value={r.id}>
-                {r.yarnName} {r.spec} {r.color ?? ''} {r.unit} 批次{r.batchNo}（可用{' '}
+                {r.yarnName} {r.spec} {r.color ?? ''} {r.unit} · {r.lotNo ?? '历史批次'} · 批次{r.batchNo}（可用{' '}
                 {Number(r.weight).toFixed(2)} kg）
               </option>
             ))}
@@ -184,6 +196,20 @@ export function TransferForm({
             placeholder="重量 kg*"
             required
           />
+          <Input
+            type="number"
+            step="1"
+            min="0"
+            value={row.packages}
+            onChange={(event) =>
+              setRows((current) =>
+                current.map((candidate, rowIndex) =>
+                  rowIndex === idx ? { ...candidate, packages: event.target.value } : candidate,
+                ),
+              )
+            }
+            placeholder="件数（部分调拨时填写）"
+          />
           <Button
             type="button"
             onClick={() => setRows((prev) => prev.filter((_, i) => i !== idx))}
@@ -195,7 +221,7 @@ export function TransferForm({
       ))}
       <Button
         type="button"
-        onClick={() => setRows((prev) => [...prev, { inventoryId: '', weight: '' }])}
+        onClick={() => setRows((prev) => [...prev, { inventoryId: '', weight: '', packages: '' }])}
       >
         加一行
       </Button>

@@ -18,12 +18,15 @@ describe('deployment showcase contract', () => {
   it('builds and starts through a guarded container entrypoint', () => {
     const dockerfile = read('Dockerfile')
     const entrypoint = read('scripts/container-entrypoint.sh')
+    const workflow = read('.github/workflows/ci.yml')
 
     expect(dockerfile).toContain('RUN npm ci')
     expect(dockerfile).toContain('RUN npx prisma generate && npm run build')
     expect(dockerfile).toContain('ENTRYPOINT ["./scripts/container-entrypoint.sh"]')
     expect(entrypoint).toContain('npx prisma migrate deploy')
     expect(entrypoint).toContain('first_boot')
+    expect(workflow).toContain('docker run --detach --name yarn-inventory-demo-ci')
+    expect(workflow).toContain('http://127.0.0.1:3100/api/health')
   })
 
   it('keeps application data and backups in named volumes', () => {
@@ -43,8 +46,11 @@ describe('deployment showcase contract', () => {
 
   it('allows deployment passwords to override local demo defaults', () => {
     const seed = read('prisma/seed.ts')
+    const e2e = read('scripts/e2e.mjs')
 
     expect(seed).toContain("process.env.ADMIN1_PASSWORD || 'demo123456'")
     expect(seed).toContain("process.env.ADMIN2_PASSWORD || 'demo123456'")
+    expect(e2e).toContain("process.env.E2E_BASE_URL || 'http://localhost:3000'")
+    expect(e2e).not.toContain("const base = 'http://localhost:3000'")
   })
 })

@@ -27,42 +27,44 @@ model Yarn {
 }
 
 model YarnVariant {
-  id                    String                @id @default(cuid())
-  yarnId                String
-  yarn                  Yarn                  @relation(fields: [yarnId], references: [id])
-  spec                  String
-  color                 String
-  unit                  String                @default("kg")
-  active                Boolean               @default(true)
-  createdAt             DateTime              @default(now())
-  inventories           Inventory[]
-  purchaseItems         PurchaseItem[]
-  batches               Batch[]
-  processingReturnItems ProcessingReturnItem[]
+  id                       String                    @id @default(cuid())
+  yarnId                   String
+  yarn                     Yarn                      @relation(fields: [yarnId], references: [id])
+  spec                     String
+  color                    String
+  unit                     String                    @default("kg")
+  active                   Boolean                   @default(true)
+  createdAt                DateTime                  @default(now())
+  inventories              Inventory[]
+  purchaseItems            PurchaseItem[]
+  batches                  Batch[]
+  processingReturnItems    ProcessingReturnItem[]
   processingFeeSettlements ProcessingFeeSettlement[]
+  inventoryLots            InventoryLot[]
 
   @@unique([yarnId, spec, color, unit])
 }
 
 model Warehouse {
-  id                    String          @id @default(cuid())
-  name                  String
-  type                  String          @default("WAREHOUSE") // WAREHOUSE | FACTORY
-  address               String?
-  manager               String?
-  active                Boolean         @default(true)
-  stocktakeIntervalDays Int?            @default(30)
-  createdAt             DateTime        @default(now())
-  purchaseOrders        PurchaseOrder[]
-  saleOrders            SaleOrder[]
-  fromTransferOrders    TransferOrder[] @relation("FromWarehouse")
-  toTransferOrders      TransferOrder[] @relation("ToWarehouse")
-  fromProcessingReturns ProcessingReturn[] @relation("ProcessingReturnFactory")
-  toProcessingReturns   ProcessingReturn[] @relation("ProcessingReturnWarehouse")
-  inventories           Inventory[]
-  stocktakes            Stocktake[]
+  id                       String                    @id @default(cuid())
+  name                     String
+  type                     String                    @default("WAREHOUSE") // WAREHOUSE | FACTORY
+  address                  String?
+  manager                  String?
+  active                   Boolean                   @default(true)
+  stocktakeIntervalDays    Int?                      @default(30)
+  createdAt                DateTime                  @default(now())
+  purchaseOrders           PurchaseOrder[]
+  saleOrders               SaleOrder[]
+  fromTransferOrders       TransferOrder[]           @relation("FromWarehouse")
+  toTransferOrders         TransferOrder[]           @relation("ToWarehouse")
+  fromProcessingReturns    ProcessingReturn[]        @relation("ProcessingReturnFactory")
+  toProcessingReturns      ProcessingReturn[]        @relation("ProcessingReturnWarehouse")
+  inventories              Inventory[]
+  stocktakes               Stocktake[]
   processingFeeSettlements ProcessingFeeSettlement[]
   processingFeePayments    ProcessingFeePayment[]
+  processingJobs           ProcessingJob[]           @relation("ProcessingJobFactory")
 }
 
 model Counterparty {
@@ -86,6 +88,7 @@ model Batch {
   createdAt     DateTime       @default(now())
   inventories   Inventory[]
   purchaseItems PurchaseItem[]
+  inventoryLots InventoryLot[]
 
   @@unique([variantId, batchNo])
 }
@@ -103,7 +106,11 @@ model PurchaseOrder {
   totalAmount Decimal
   freight     Decimal        @default(0)
   createdAt   DateTime       @default(now())
+  reversedAt  DateTime?
+  reversedBy  String?
   items       PurchaseItem[]
+
+  @@index([reversedAt, date])
 }
 
 model PurchaseItem {
@@ -118,6 +125,8 @@ model PurchaseItem {
   price     Decimal
   amount    Decimal
   packages  Int?
+  lotId     String?       @unique
+  lot       InventoryLot? @relation("PurchaseItemLot", fields: [lotId], references: [id])
 }
 
 model SaleOrder {
@@ -133,21 +142,26 @@ model SaleOrder {
   totalAmount Decimal
   freight     Decimal      @default(0)
   createdAt   DateTime     @default(now())
+  reversedAt  DateTime?
+  reversedBy  String?
   items       SaleItem[]
+
+  @@index([reversedAt, date])
 }
 
 model SaleItem {
-  id          String    @id @default(cuid())
+  id          String           @id @default(cuid())
   orderId     String
-  order       SaleOrder @relation(fields: [orderId], references: [id])
+  order       SaleOrder        @relation(fields: [orderId], references: [id])
   inventoryId String
-  inventory   Inventory @relation(fields: [inventoryId], references: [id])
+  inventory   Inventory        @relation(fields: [inventoryId], references: [id])
   weight      Decimal
   price       Decimal
   amount      Decimal
   packages    Int?
-  unitCost    Decimal   @default(0)
-  unitFreight Decimal   @default(0)
+  unitCost    Decimal          @default(0)
+  unitFreight Decimal          @default(0)
+  allocations SaleAllocation[]
 }
 
 model TransferOrder {
@@ -167,34 +181,43 @@ model TransferOrder {
 }
 
 model TransferItem {
-  id          String        @id @default(cuid())
-  orderId     String
-  order       TransferOrder @relation(fields: [orderId], references: [id])
-  inventoryId String
-  inventory   Inventory     @relation(fields: [inventoryId], references: [id])
-  weight      Decimal
-  packages    Int?
+  id                     String        @id @default(cuid())
+  orderId                String
+  order                  TransferOrder @relation(fields: [orderId], references: [id])
+  inventoryId            String
+  inventory              Inventory     @relation(fields: [inventoryId], references: [id])
+  weight                 Decimal
+  packages               Int?
+  destinationInventoryId String?
 }
 
 model Inventory {
-  id                    String                @id @default(cuid())
+  id                    String                 @id @default(cuid())
   warehouseId           String
-  warehouse             Warehouse             @relation(fields: [warehouseId], references: [id])
+  warehouse             Warehouse              @relation(fields: [warehouseId], references: [id])
   variantId             String
-  variant               YarnVariant           @relation(fields: [variantId], references: [id])
+  variant               YarnVariant            @relation(fields: [variantId], references: [id])
   batchId               String
-  batch                 Batch                 @relation(fields: [batchId], references: [id])
+  batch                 Batch                  @relation(fields: [batchId], references: [id])
+  lotId                 String?
+  lot                   InventoryLot?          @relation(fields: [lotId], references: [id])
   weight                Decimal
-  cost                  Decimal               @default(0)
-  freight               Decimal               @default(0)
-  processingFeeSettled  Boolean               @default(false)
+  packages              Int?
+  cost                  Decimal                @default(0)
+  freight               Decimal                @default(0)
+  processingFeeSettled  Boolean                @default(false)
   processingFeePerKg    Decimal?
-  archived              Boolean               @default(false)
-  updatedAt             DateTime              @updatedAt
+  archived              Boolean                @default(false)
+  version               Int                    @default(0)
+  updatedAt             DateTime               @updatedAt
   saleItems             SaleItem[]
   transferItems         TransferItem[]
   stocktakeItems        StocktakeItem[]
   processingReturnItems ProcessingReturnItem[]
+  saleAllocations       SaleAllocation[]
+  processingInputs      ProcessingInput[]
+
+  @@index([lotId, warehouseId, archived])
 }
 
 model Stocktake {
@@ -222,7 +245,7 @@ model StocktakeItem {
 
 model Settlement {
   id             String       @id @default(cuid())
-  side           String       // PURCHASE（应付给供应商）| SALE（应收自客户）
+  side           String // PURCHASE（应付给供应商）| SALE（应收自客户）
   counterpartyId String
   counterparty   Counterparty @relation(fields: [counterpartyId], references: [id])
   amount         Decimal
@@ -243,44 +266,46 @@ model AuditLog {
 }
 
 model ProcessingReturn {
-  id                   String   @id @default(cuid())
-  orderNo              String   @unique
-  date                 DateTime
-  factoryId            String
-  factory              Warehouse @relation("ProcessingReturnFactory", fields: [factoryId], references: [id])
-  warehouseId          String
-  warehouse            Warehouse @relation("ProcessingReturnWarehouse", fields: [warehouseId], references: [id])
-  handlerName          String
-  note                 String?
-  processingFeePerKg   Decimal  @default(0)
-  freight              Decimal  @default(0)
+  id                     String                 @id @default(cuid())
+  orderNo                String                 @unique
+  date                   DateTime
+  factoryId              String
+  factory                Warehouse              @relation("ProcessingReturnFactory", fields: [factoryId], references: [id])
+  warehouseId            String
+  warehouse              Warehouse              @relation("ProcessingReturnWarehouse", fields: [warehouseId], references: [id])
+  handlerName            String
+  note                   String?
+  processingFeePerKg     Decimal                @default(0)
+  freight                Decimal                @default(0)
   expectedSellPricePerKg Decimal?
-  createdAt            DateTime @default(now())
-  items                ProcessingReturnItem[]
+  createdAt              DateTime               @default(now())
+  items                  ProcessingReturnItem[]
 }
 
 model ProcessingReturnItem {
-  id           String         @id @default(cuid())
-  orderId      String
-  order        ProcessingReturn @relation(fields: [orderId], references: [id])
-  inventoryId  String
-  inventory    Inventory      @relation(fields: [inventoryId], references: [id])
-  weight       Decimal
-  variantId    String
-  variant      YarnVariant    @relation(fields: [variantId], references: [id])
-  batchNo      String
-  outputWeight Decimal
-  packages     Int?
-  newCost      Decimal        @default(0)
-  newFreight   Decimal        @default(0)
+  id                     String           @id @default(cuid())
+  orderId                String
+  order                  ProcessingReturn @relation(fields: [orderId], references: [id])
+  inventoryId            String
+  inventory              Inventory        @relation(fields: [inventoryId], references: [id])
+  weight                 Decimal
+  variantId              String
+  variant                YarnVariant      @relation(fields: [variantId], references: [id])
+  batchNo                String
+  outputWeight           Decimal
+  packages               Int?
+  newCost                Decimal          @default(0)
+  newFreight             Decimal          @default(0)
+  outputLotId            String?
+  destinationInventoryId String?
 }
 
 model ProcessingFeeSettlement {
-  id              String      @id @default(cuid())
+  id              String         @id @default(cuid())
   warehouseId     String
-  warehouse       Warehouse   @relation(fields: [warehouseId], references: [id])
+  warehouse       Warehouse      @relation(fields: [warehouseId], references: [id])
   variantId       String
-  variant         YarnVariant @relation(fields: [variantId], references: [id])
+  variant         YarnVariant    @relation(fields: [variantId], references: [id])
   batchNo         String
   inputWeight     Decimal
   outputWeight    Decimal
@@ -289,7 +314,9 @@ model ProcessingFeeSettlement {
   remainingWeight Decimal
   newUnitCost     Decimal
   handlerName     String
-  createdAt       DateTime    @default(now())
+  createdAt       DateTime       @default(now())
+  processingJobId String?        @unique
+  processingJob   ProcessingJob? @relation(fields: [processingJobId], references: [id])
 
   @@index([warehouseId, createdAt])
 }
@@ -305,4 +332,131 @@ model ProcessingFeePayment {
   createdAt   DateTime  @default(now())
 
   @@index([factoryId, date])
+}
+
+model InventoryLot {
+  id                String            @id @default(cuid())
+  lotNo             String            @unique
+  scanCode          String            @unique
+  sourceType        String            @default("PURCHASE") // PURCHASE | PROCESSING | LEGACY_AGGREGATED
+  provenanceQuality String            @default("EXACT") // EXACT | LEGACY_AGGREGATED
+  variantId         String
+  variant           YarnVariant       @relation(fields: [variantId], references: [id])
+  batchId           String
+  batch             Batch             @relation(fields: [batchId], references: [id])
+  initialWeight     Decimal
+  initialPackages   Int?
+  goodsCost         Decimal           @default(0)
+  freightCost       Decimal           @default(0)
+  processingCost    Decimal           @default(0)
+  status            String            @default("AVAILABLE") // AVAILABLE | AWAITING_PROCESS | CONSUMED | ARCHIVED
+  createdAt         DateTime          @default(now())
+  purchaseItem      PurchaseItem?     @relation("PurchaseItemLot")
+  processingOutput  ProcessingOutput? @relation("ProcessingOutputLot")
+  inventories       Inventory[]
+  movements         StockMovement[]
+  saleAllocations   SaleAllocation[]
+  processingInputs  ProcessingInput[]
+
+  @@index([variantId, batchId])
+  @@index([status, createdAt])
+}
+
+model StockMovement {
+  id              String       @id @default(cuid())
+  lotId           String
+  lot             InventoryLot @relation(fields: [lotId], references: [id])
+  type            String // PURCHASE_RECEIPT | TRANSFER | PROCESS_CONSUME | PROCESS_PRODUCE | SALE | STOCKTAKE | REVERSAL
+  referenceType   String
+  referenceId     String
+  referenceItemId String?
+  fromWarehouseId String?
+  toWarehouseId   String?
+  weight          Decimal
+  packages        Int?
+  goodsCost       Decimal      @default(0)
+  freightCost     Decimal      @default(0)
+  reversalOfId    String?
+  occurredAt      DateTime
+  createdAt       DateTime     @default(now())
+
+  @@index([lotId, occurredAt])
+  @@index([referenceType, referenceId])
+}
+
+model SaleAllocation {
+  id          String       @id @default(cuid())
+  saleItemId  String
+  saleItem    SaleItem     @relation(fields: [saleItemId], references: [id])
+  lotId       String
+  lot         InventoryLot @relation(fields: [lotId], references: [id])
+  inventoryId String?
+  inventory   Inventory?   @relation(fields: [inventoryId], references: [id])
+  warehouseId String
+  weight      Decimal
+  packages    Int?
+  unitCost    Decimal
+  unitFreight Decimal
+  createdAt   DateTime     @default(now())
+
+  @@index([saleItemId])
+  @@index([lotId, createdAt])
+}
+
+model ProcessingJob {
+  id              String                   @id @default(cuid())
+  orderNo         String                   @unique
+  date            DateTime
+  factoryId       String
+  factory         Warehouse                @relation("ProcessingJobFactory", fields: [factoryId], references: [id])
+  status          String                   @default("COMPLETED") // DRAFT | AT_FACTORY | PROCESSING | COMPLETED | CLOSED | REVERSED
+  feeBasis        String                   @default("OUTPUT") // INPUT | OUTPUT | FACTORY_WEIGHT | FIXED
+  chargedWeight   Decimal
+  feePerKg        Decimal
+  feeTotal        Decimal
+  outboundFreight Decimal                  @default(0)
+  returnFreight   Decimal                  @default(0)
+  otherCost       Decimal                  @default(0)
+  inputWeight     Decimal
+  outputWeight    Decimal
+  weightDiff      Decimal
+  handlerName     String
+  note            String?
+  createdAt       DateTime                 @default(now())
+  inputs          ProcessingInput[]
+  outputs         ProcessingOutput[]
+  feeSettlement   ProcessingFeeSettlement?
+
+  @@index([factoryId, date])
+}
+
+model ProcessingInput {
+  id          String        @id @default(cuid())
+  jobId       String
+  job         ProcessingJob @relation(fields: [jobId], references: [id])
+  lotId       String
+  lot         InventoryLot  @relation(fields: [lotId], references: [id])
+  inventoryId String
+  inventory   Inventory     @relation(fields: [inventoryId], references: [id])
+  weight      Decimal
+  packages    Int?
+  goodsCost   Decimal
+  freightCost Decimal
+
+  @@index([jobId])
+  @@index([lotId])
+}
+
+model ProcessingOutput {
+  id                 String        @id @default(cuid())
+  jobId              String
+  job                ProcessingJob @relation(fields: [jobId], references: [id])
+  lotId              String        @unique
+  lot                InventoryLot  @relation("ProcessingOutputLot", fields: [lotId], references: [id])
+  weight             Decimal
+  packages           Int?
+  allocatedGoodsCost Decimal
+  allocatedFreight   Decimal
+
+  @@index([jobId])
 }

@@ -167,6 +167,8 @@ describe('加工厂对账单', () => {
     const payRow = rows.find((r) => r.type === '付款')!
     expect(feeRow.amount.toString()).toBe('200')
     expect(feeRow.yarnName).toBe('棉纱')
+    expect(feeRow.lots).toHaveLength(1)
+    expect(feeRow.lots[0].lotNo).toMatch(/^LOT-/)
     expect(payRow.amount.toString()).toBe('-50')
     expect(rows[rows.length - 1].balance.toString()).toBe('150')
   })

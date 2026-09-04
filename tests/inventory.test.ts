@@ -57,7 +57,7 @@ describe('买入入库', () => {
     expect(rows[0].weight.toString()).toBe('1000')
   })
 
-  it('同一批次第二次入库累加，不同批次分行', async () => {
+  it('同一供应商批次分次买入也保留独立内部批次和各自成本', async () => {
     const base = await createBase()
     await createPurchase(db, {
       date: new Date('2026-08-01'),
@@ -81,10 +81,13 @@ describe('买入入库', () => {
       items: [{ variantId: base.variantId, batchNo: 'G-002', weight: 200, price: 22 }],
     })
     const rows = await getInventoryRows(db, { warehouseId: base.warehouseA })
-    expect(rows).toHaveLength(2)
-    const g1 = rows.find((r) => r.batch.batchNo === 'G-001')
+    expect(rows).toHaveLength(3)
+    const g1 = rows.filter((r) => r.batch.batchNo === 'G-001')
     const g2 = rows.find((r) => r.batch.batchNo === 'G-002')
-    expect(g1?.weight.toString()).toBe('800')
+    expect(g1).toHaveLength(2)
+    expect(g1.map((row) => row.weight.toString()).sort()).toEqual(['300', '500'])
+    expect(g1.map((row) => row.cost.div(row.weight).toString()).sort()).toEqual(['20', '21'])
+    expect(new Set(g1.map((row) => row.lotId)).size).toBe(2)
     expect(g2?.weight.toString()).toBe('200')
   })
 
@@ -128,7 +131,7 @@ describe('买入入库', () => {
       items: [{ inventoryId: rows[0].id, weight: 10, price: 12 }],
     })
     await expect(updatePurchaseFreight(db, order.id, 100)).rejects.toThrow(
-      '库存已发生卖出、调拨或盘点',
+      '已发生卖出、调拨、加工或盘点',
     )
     const unchanged = await db.purchaseOrder.findUniqueOrThrow({ where: { id: order.id } })
     expect(unchanged.freight.toString()).toBe('0')
@@ -179,10 +182,13 @@ describe('买入入库', () => {
         handlerName: '爸爸',
         items: [{ variantId: base.variantId, batchNo: 'G-003', weight: 100, price: 20 }],
       })
-      const all = await db.purchaseOrder.findMany({ select: { orderNo: true } })
-      expect(all).toHaveLength(2)
+      const all = await db.purchaseOrder.findMany({
+        select: { orderNo: true, reversedAt: true },
+      })
+      expect(all).toHaveLength(3)
       expect(all.map((o) => o.orderNo)).toContain(third.orderNo)
-      expect(new Set(all.map((o) => o.orderNo)).size).toBe(2)
+      expect(new Set(all.map((o) => o.orderNo)).size).toBe(3)
+      expect(all.find((o) => o.orderNo === first.orderNo)?.reversedAt).toBeTruthy()
     })
 
   it('买入自动创建新颜色变体，重复买入复用同一变体', async () => {
@@ -565,8 +571,15 @@ describe('加工收回', () => {
       items: [{ inventoryId: rows[0].id, weight: 100 }],
     })
     const factoryRows = await getInventoryRows(db, { warehouseId: factory.id })
-    // 新流程：加工费在库存页结算（2 元/kg × 100kg = 200 → 账面成本 2000 + 200 = 2200）
-    await settleProcessingFee(db, factoryRows[0].id, { feePerKg: 2 })
+    // 完工时实际称重 80kg，并在此时建立紫色成品批次和确认加工应付。
+    await settleProcessingFee(db, factoryRows[0].id, {
+      feePerKg: 2,
+      spec: '20支',
+      color: '紫色',
+      unit: 'kg',
+      batchNo: 'P-001',
+      outputWeight: 80,
+    })
     const settledRows = await getInventoryRows(db, { warehouseId: factory.id })
     const settledRow = settledRows.find((r) => r.processingFeeSettled)!
     const ret = await createProcessingReturn(db, {
@@ -579,33 +592,27 @@ describe('加工收回', () => {
       items: [
         {
           inventoryId: settledRow.id,
-          weight: 100,
+          weight: 80,
           spec: '20支',
           color: '紫色',
           unit: 'kg',
           batchNo: 'P-001',
-          outputWeight: 800,
+          outputWeight: 80,
         },
       ],
     })
-    // 已结算加工费后账面成本 2200 → 新单位成本 2200/800 = 2.75
-    // 送厂账面运费 380 → 380/800=0.475→0.48；回程 50/800=0.0625→0.06；新单位运费 0.54
-    // 新总成本 2.75×800 = 2200；新总运费 0.54×800 = 432；预计毛利 (5−2.75−0.54)×800 = 1368
-    expect(ret.items[0].newCost.toString()).toBe('2200')
-    expect(ret.items[0].newFreight.toString()).toBe('432')
-    expect(ret.items[0].outputWeight.toString()).toBe('800')
-    expect(Number(ret.items[0].newCost) / Number(ret.items[0].outputWeight)).toBeCloseTo(2.75)
-    expect(Number(ret.items[0].newFreight) / Number(ret.items[0].outputWeight)).toBeCloseTo(0.54)
-    const unitCost = Number(ret.items[0].newCost) / Number(ret.items[0].outputWeight)
-    const unitFreight = Number(ret.items[0].newFreight) / Number(ret.items[0].outputWeight)
-    const profit = (5 - unitCost - unitFreight) * Number(ret.items[0].outputWeight)
-    expect(profit).toBeCloseTo(1368)
+    // 成本 2000 + 2×80 = 2160；既有运费 380，加回程运费 50 后为 430。
+    expect(ret.items[0].newCost.toString()).toBe('2160')
+    expect(ret.items[0].newFreight.toString()).toBe('430')
+    expect(ret.items[0].outputWeight.toString()).toBe('80')
+    expect(ret.items[0].outputLotId).toBe(settledRow.lotId)
+    expect(ret.items[0].destinationInventoryId).toBeTruthy()
     const out = await getInventoryRows(db, { warehouseId: base.warehouseA })
     const purple = out.find((r) => r.variant.color === '紫色')
     expect(purple?.variant.spec).toBe('20支')
-    expect(purple?.weight.toString()).toBe('800')
-    expect(purple?.cost.toString()).toBe('2200')
-    expect(purple?.freight.toString()).toBe('432')
+    expect(purple?.weight.toString()).toBe('80')
+    expect(purple?.cost.toString()).toBe('2160')
+    expect(purple?.freight.toString()).toBe('430')
     const factoryAfter = await getInventoryRows(db, {
       warehouseId: factory.id,
       includeZero: true,

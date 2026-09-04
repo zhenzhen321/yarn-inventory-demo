@@ -34,3 +34,31 @@ jobs:
     steps:
       - uses: actions/checkout@v5
       - run: docker build --tag yarn-inventory-demo:ci .
+      - name: Start a fresh demo database
+        run: |
+          docker run --detach --name yarn-inventory-demo-ci \
+            --publish 127.0.0.1:3100:3000 \
+            --env DATABASE_URL=file:/data/ci.db \
+            --env SESSION_SECRET=ci-container-session-secret-at-least-32-characters \
+            --env COOKIE_SECURE=false \
+            --env ADMIN1_PASSWORD=ci-admin-password \
+            --env ADMIN2_PASSWORD=ci-clerk-password \
+            --env SEED_DEMO_DATA=true \
+            --volume yarn-inventory-demo-ci-data:/data \
+            yarn-inventory-demo:ci
+          for attempt in {1..60}; do
+            if curl --fail --silent http://127.0.0.1:3100/api/health; then
+              exit 0
+            fi
+            sleep 2
+          done
+          docker logs yarn-inventory-demo-ci
+          exit 1
+      - name: Show container logs on failure
+        if: failure()
+        run: docker logs yarn-inventory-demo-ci
+      - name: Clean up container
+        if: always()
+        run: |
+          docker rm --force yarn-inventory-demo-ci || true
+          docker volume rm yarn-inventory-demo-ci-data || true

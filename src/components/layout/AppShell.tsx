@@ -29,7 +29,7 @@ export function AppShell({ userName, children }: { userName: string; children: R
   return (
     <div className="flex min-h-screen flex-col">
       <header className="sticky top-0 z-10 border-b bg-white">
-        <div className="mx-auto flex max-w-5xl items-center justify-between px-4 py-3">
+        <div className="mx-auto flex max-w-7xl items-center justify-between px-4 py-3">
           <Link href="/app/dashboard" className="text-lg font-bold">
             纱线进销存
           </Link>
@@ -40,7 +40,7 @@ export function AppShell({ userName, children }: { userName: string; children: R
             </form>
           </div>
         </div>
-        <nav className="mx-auto flex max-w-5xl gap-2 overflow-x-auto px-4 pb-2 text-sm">
+        <nav className="mx-auto flex max-w-7xl gap-2 overflow-x-auto px-4 pb-2 text-sm">
           {nav.map((n) => (
             <Link
               key={n.href}
@@ -56,7 +56,7 @@ export function AppShell({ userName, children }: { userName: string; children: R
           ))}
         </nav>
       </header>
-      <main className="mx-auto w-full max-w-5xl flex-1 px-4 py-6">{children}</main>
+      <main className="mx-auto w-full max-w-7xl flex-1 px-4 py-6">{children}</main>
     </div>
   )
 }

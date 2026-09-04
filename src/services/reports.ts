@@ -40,11 +40,11 @@ export async function getRecentFlow(db: PrismaClient, days = 30): Promise<FlowRo
   const since = new Date(Date.now() - days * 24 * 60 * 60 * 1000)
   const [purchases, sales] = await Promise.all([
     db.purchaseOrder.findMany({
-      where: { date: { gte: since } },
+      where: { date: { gte: since }, reversedAt: null },
       include: { supplier: true, warehouse: true },
     }),
     db.saleOrder.findMany({
-      where: { date: { gte: since } },
+      where: { date: { gte: since }, reversedAt: null },
       include: { customer: true, warehouse: true },
     }),
   ])
@@ -100,7 +100,7 @@ export async function getCustomerOrders(
   customerId: string,
 ): Promise<OrderQueryRow[]> {
   const orders = await db.saleOrder.findMany({
-    where: { customerId },
+    where: { customerId, reversedAt: null },
     orderBy: { date: 'desc' },
     include: {
       customer: true,
@@ -143,7 +143,7 @@ export async function getSupplierOrders(
   supplierId: string,
 ): Promise<OrderQueryRow[]> {
   const orders = await db.purchaseOrder.findMany({
-    where: { supplierId },
+    where: { supplierId, reversedAt: null },
     orderBy: { date: 'desc' },
     include: {
       supplier: true,
@@ -185,8 +185,8 @@ export interface ProfitEstimate {
 
 export async function getProfitEstimate(db: PrismaClient): Promise<ProfitEstimate> {
   const [saleOrders, saleItems] = await Promise.all([
-    db.saleOrder.findMany(),
-    db.saleItem.findMany(),
+    db.saleOrder.findMany({ where: { reversedAt: null } }),
+    db.saleItem.findMany({ where: { order: { reversedAt: null } } }),
   ])
   let saleGoodsTotal = new Prisma.Decimal(0)
   let saleFreightTotal = new Prisma.Decimal(0)

@@ -15,17 +15,14 @@ export default async function NewSettlementPage({
     await Promise.all([
       prisma.counterparty.findMany({
         where: { active: true, type: { in: ['SUPPLIER', 'BOTH'] } },
-        select: { id: true, name: true },
         orderBy: { name: 'asc' },
       }),
       prisma.counterparty.findMany({
         where: { active: true, type: { in: ['CUSTOMER', 'BOTH'] } },
-        select: { id: true, name: true },
         orderBy: { name: 'asc' },
       }),
       prisma.warehouse.findMany({
         where: { active: true, type: 'FACTORY' },
-        select: { id: true, name: true },
         orderBy: { name: 'asc' },
       }),
       getPayableSummary(prisma),
@@ -34,33 +31,20 @@ export default async function NewSettlementPage({
       getSessionUser(),
     ])
 
-  const payableOptions = payables.map((row) => ({
-    id: row.id,
-    remainingAmount: row.remainingAmount.toString(),
-  }))
-  const receivableOptions = receivables.map((row) => ({
-    id: row.id,
-    remainingAmount: row.remainingAmount.toString(),
-  }))
-  const factoryFeeOptions = factoryFees.map((row) => ({
-    id: row.id,
-    owedAmount: row.owedAmount.toString(),
-  }))
-
   return (
     <div className="space-y-4">
       <SettlementPageHeader
         title="登记结算"
-        description="选择结算方向和往来单位，系统会显示当前未结金额。"
+        description="选择结算方向和往来单位，系统会显示当前未结金额及该对象的往来明细。"
       />
       <SettleForm
         defaultHandler={user?.name ?? 'admin'}
         suppliers={suppliers}
         customers={customers}
         factories={factories}
-        payables={payableOptions}
-        receivables={receivableOptions}
-        factoryFees={factoryFeeOptions}
+        payables={payables}
+        receivables={receivables}
+        factoryFees={factoryFees}
         initialSide={filters.side ?? ''}
         initialCounterpartyId={filters.cp ?? ''}
       />

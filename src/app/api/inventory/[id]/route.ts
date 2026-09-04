@@ -8,11 +8,14 @@ import { settleProcessingFee } from '@/services/inventory'
 const feeSchema = z.object({
   processingFeePerKg: z.coerce.number().nonnegative('加工费不能为负'),
   inputWeight: z.coerce.number().positive('本次加工重量必须大于 0').optional(),
+  inputPackages: z.coerce.number().int().nonnegative('投入件数不能为负').optional().nullable(),
   spec: z.string().optional(),
   color: z.string().optional(),
   unit: z.string().optional(),
   batchNo: z.string().optional(),
   outputWeight: z.coerce.number().positive('加工后重量必须大于 0').optional(),
+  outputPackages: z.coerce.number().int().nonnegative('加工后件数不能为负').optional().nullable(),
+  note: z.string().optional().nullable(),
 })
 
 export async function PATCH(req: Request, { params }: { params: Promise<{ id: string }> }) {
@@ -31,12 +34,15 @@ export async function PATCH(req: Request, { params }: { params: Promise<{ id: st
     const result = await settleProcessingFee(prisma, id, {
       feePerKg: parsed.data.processingFeePerKg,
       inputWeight: parsed.data.inputWeight,
+      inputPackages: parsed.data.inputPackages,
       handlerName: user.name,
       spec: parsed.data.spec,
       color: parsed.data.color,
       unit: parsed.data.unit,
       batchNo: parsed.data.batchNo,
       outputWeight: parsed.data.outputWeight,
+      outputPackages: parsed.data.outputPackages,
+      note: parsed.data.note,
     })
     await logAudit({
       userName: user.name,
@@ -46,10 +52,20 @@ export async function PATCH(req: Request, { params }: { params: Promise<{ id: st
     })
     return NextResponse.json({
       ok: true,
+      orderNo: result.job.orderNo,
+      lotNo: result.outputLot.lotNo,
+      scanCode: result.outputLot.scanCode,
+      yarnName: result.row.variant.yarn.name,
+      spec: result.newSpec,
+      color: result.newColor,
+      unit: result.newUnit,
+      batchNo: result.newBatchNo,
       cost: result.newCost.toString(),
       inputWeight: result.inputWeight.toString(),
+      inputPackages: result.inputPackages,
       remainingWeight: result.remainingWeight.toString(),
       outputWeight: result.outputWeight.toString(),
+      outputPackages: result.outputPackages,
       newUnitCost: result.newUnitCost.toString(),
     })
   } catch (e) {

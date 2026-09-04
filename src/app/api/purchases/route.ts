@@ -31,7 +31,12 @@ export async function POST(req: Request) {
           yarnName: item.variant.yarn.name,
           spec: item.variant.spec,
           color: item.variant.color,
+          weight: item.weight.toString(),
+          unit: item.variant.unit,
           packages: item.packages,
+          batchNo: item.batch.batchNo,
+          lotNo: item.lot?.lotNo ?? null,
+          scanCode: item.lot?.scanCode ?? null,
         })),
       },
       { status: 201 },
@@ -44,6 +49,7 @@ export async function POST(req: Request) {
 
 export async function GET() {
   const orders = await prisma.purchaseOrder.findMany({
+    where: { reversedAt: null },
     orderBy: { createdAt: 'desc' },
     take: 50,
     include: { supplier: true, warehouse: true },

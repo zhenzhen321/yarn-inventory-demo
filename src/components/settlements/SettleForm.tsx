@@ -1,19 +1,38 @@
 'use client'
 
 import { FormEvent, useEffect, useRef, useState } from 'react'
+import Link from 'next/link'
 import { useRouter } from 'next/navigation'
 import { Button } from '@/components/ui/Button'
 import { Input } from '@/components/ui/Input'
 import { Select } from '@/components/ui/Select'
+import { OrderTraceLink } from '@/components/orders/OrderTraceLink'
+import type { CounterpartySummary } from '@/services/settlement'
 
-type OutstandingSummary = {
-  id: string
-  remainingAmount: string
+interface SettlementDetailRow {
+  date: string
+  type: string
+  orderNo: string | null
+  yarnName: string
+  spec: string
+  color: string
+  unit: string
+  batchNo: string
+  lots: { id: string; lotNo: string }[]
+  weight: string | null
+  inputWeight: string | null
+  outputWeight: string | null
+  price: string | null
+  feePerKg: string | null
+  amount: string
+  balance: string
+  detail: string
 }
 
-type FactoryFeeSummary = {
-  id: string
-  owedAmount: string
+interface SettlementDetailResponse {
+  name: string
+  side: 'PURCHASE' | 'SALE' | 'PROCESSING_FEE'
+  rows: SettlementDetailRow[]
 }
 
 export function SettleForm({
@@ -30,9 +49,9 @@ export function SettleForm({
   suppliers: { id: string; name: string }[]
   customers: { id: string; name: string }[]
   factories: { id: string; name: string }[]
-  payables: OutstandingSummary[]
-  receivables: OutstandingSummary[]
-  factoryFees: FactoryFeeSummary[]
+  payables: CounterpartySummary[]
+  receivables: CounterpartySummary[]
+  factoryFees: { id: string; owedAmount: { toString(): string } }[]
   defaultHandler?: string
   initialSide?: string
   initialCounterpartyId?: string
@@ -48,6 +67,10 @@ export function SettleForm({
   const [counterpartyId, setCounterpartyId] = useState(initialCounterpartyId)
   const [message, setMessage] = useState('')
   const [saved, setSaved] = useState(false)
+  const [details, setDetails] = useState<SettlementDetailResponse | null>(null)
+  const [detailsLoading, setDetailsLoading] = useState(false)
+  const [detailsMessage, setDetailsMessage] = useState('')
+  const [detailsVersion, setDetailsVersion] = useState(0)
   const formRef = useRef<HTMLFormElement>(null)
 
   const options =
@@ -57,9 +80,19 @@ export function SettleForm({
   const selected = summaries.find((s) => s.id === counterpartyId)
   const remaining = selected
     ? 'owedAmount' in selected
-      ? selected.owedAmount
-      : selected.remainingAmount
+      ? String(selected.owedAmount)
+      : String((selected as CounterpartySummary).remainingAmount)
     : ''
+
+  function replaceSettlementQuery(
+    nextSide: 'PURCHASE' | 'SALE' | 'PROCESSING_FEE',
+    nextCounterpartyId: string,
+  ) {
+    const params = new URLSearchParams()
+    params.set('side', nextSide)
+    if (nextCounterpartyId) params.set('cp', nextCounterpartyId)
+    router.replace(`/app/settlements/new?${params.toString()}`, { scroll: false })
+  }
 
   useEffect(() => {
     if (initialSide === 'SALE' || initialSide === 'PURCHASE' || initialSide === 'PROCESSING_FEE') {
@@ -70,6 +103,40 @@ export function SettleForm({
       formRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' })
     }
   }, [initialSide, initialCounterpartyId])
+
+  useEffect(() => {
+    if (!counterpartyId) {
+      setDetails(null)
+      setDetailsMessage('')
+      setDetailsLoading(false)
+      return
+    }
+
+    const controller = new AbortController()
+    const params = new URLSearchParams({ side, counterpartyId })
+    setDetails(null)
+    setDetailsMessage('')
+    setDetailsLoading(true)
+
+    async function loadDetails() {
+      try {
+        const response = await fetch(`/api/settlement-details?${params.toString()}`, {
+          signal: controller.signal,
+        })
+        const data = await response.json().catch(() => ({}))
+        if (!response.ok) throw new Error(data.error || '明细加载失败')
+        setDetails(data as SettlementDetailResponse)
+      } catch (error) {
+        if (error instanceof DOMException && error.name === 'AbortError') return
+        setDetailsMessage(error instanceof Error ? error.message : '明细加载失败')
+      } finally {
+        if (!controller.signal.aborted) setDetailsLoading(false)
+      }
+    }
+
+    void loadDetails()
+    return () => controller.abort()
+  }, [side, counterpartyId, detailsVersion])
 
   async function onSubmit(e: FormEvent<HTMLFormElement>) {
     e.preventDefault()
@@ -94,8 +161,8 @@ export function SettleForm({
     )
     if (res.ok) {
       setSaved(true)
-      setCounterpartyId('')
       e.currentTarget.reset()
+      setDetailsVersion((version) => version + 1)
       router.refresh()
     } else {
       const data = await res.json().catch(() => ({}))
@@ -115,8 +182,10 @@ export function SettleForm({
         <Select
           value={side}
           onChange={(e) => {
-            setSide(e.target.value as 'PURCHASE' | 'SALE' | 'PROCESSING_FEE')
+            const nextSide = e.target.value as 'PURCHASE' | 'SALE' | 'PROCESSING_FEE'
+            setSide(nextSide)
             setCounterpartyId('')
+            replaceSettlementQuery(nextSide, '')
           }}
         >
           <option value="PURCHASE">应付给供应商</option>
@@ -126,7 +195,15 @@ export function SettleForm({
       </label>
       <label className="text-sm">
         往来单位
-        <Select value={counterpartyId} onChange={(e) => setCounterpartyId(e.target.value)} required>
+        <Select
+          value={counterpartyId}
+          onChange={(e) => {
+            const nextCounterpartyId = e.target.value
+            setCounterpartyId(nextCounterpartyId)
+            replaceSettlementQuery(side, nextCounterpartyId)
+          }}
+          required
+        >
           <option value="">选择往来单位</option>
           {options.map((o) => (
             <option key={o.id} value={o.id}>
@@ -178,6 +255,93 @@ export function SettleForm({
       </div>
       {saved && <p className="text-sm text-green-600">结算已登记</p>}
       {message && <p className="text-sm text-red-600">{message}</p>}
+
+      {counterpartyId ? (
+        <section className="space-y-3 border-t pt-4 sm:col-span-2 lg:col-span-6">
+          <div>
+            <h2 className="font-bold">
+              结算对象明细{details ? ` · ${details.name}` : ''}
+            </h2>
+            <p className="mt-1 text-xs text-gray-500">
+              正数为新增应付/应收或加工费，负数为付款/收款；余额按业务日期顺序累计。
+            </p>
+          </div>
+
+          {detailsLoading ? <p className="text-sm text-gray-500">正在加载明细...</p> : null}
+          {detailsMessage ? <p className="text-sm text-red-600">{detailsMessage}</p> : null}
+          {details && details.rows.length === 0 ? (
+            <p className="rounded border bg-gray-50 p-3 text-sm text-gray-500">该对象暂无相关明细</p>
+          ) : null}
+          {details && details.rows.length > 0 ? (
+            <div className="overflow-x-auto rounded border bg-white">
+              <table className="w-full min-w-[1080px] text-sm">
+                <thead>
+                  <tr className="border-b bg-gray-50 text-left text-gray-600">
+                    {[
+                      '日期',
+                      '类型',
+                      '单号',
+                      '品名 / 规格 / 色号',
+                      '批次 / 内部批次',
+                      side === 'PROCESSING_FEE' ? '投入 / 产出' : '重量',
+                      side === 'PROCESSING_FEE' ? '加工单价' : '单价',
+                      '本笔金额',
+                      '累计余额',
+                      '说明',
+                    ].map((header) => (
+                      <th key={header} className="px-3 py-2 font-medium">{header}</th>
+                    ))}
+                  </tr>
+                </thead>
+                <tbody>
+                  {details.rows.map((row, index) => (
+                    <tr key={`${row.date}-${row.type}-${row.orderNo ?? 'record'}-${index}`} className="border-b last:border-b-0">
+                      <td className="px-3 py-2">{row.date}</td>
+                      <td className="px-3 py-2">{row.type}</td>
+                      <td className="px-3 py-2">
+                        {row.orderNo && details.side !== 'PROCESSING_FEE' ? (
+                          <OrderTraceLink orderNo={row.orderNo} orderType={details.side} />
+                        ) : '-'}
+                      </td>
+                      <td className="px-3 py-2">
+                        {[row.yarnName, row.spec, row.color].filter(Boolean).join(' / ') || '-'}
+                      </td>
+                      <td className="px-3 py-2">
+                        <div>{row.batchNo || '-'}</div>
+                        {row.lots.length ? (
+                          <div className="mt-1">
+                            {row.lots.map((lot, lotIndex) => (
+                              <span key={lot.id}>
+                                {lotIndex > 0 ? '、' : ''}
+                                <Link href={`/app/lots/${lot.id}`} className="text-blue-700 hover:underline">
+                                  {lot.lotNo}
+                                </Link>
+                              </span>
+                            ))}
+                          </div>
+                        ) : null}
+                      </td>
+                      <td className="px-3 py-2">
+                        {side === 'PROCESSING_FEE'
+                          ? row.inputWeight && row.outputWeight
+                            ? `${row.inputWeight} → ${row.outputWeight} ${row.unit || 'kg'}`
+                            : '-'
+                          : row.weight
+                            ? `${row.weight} ${row.unit}`
+                            : '-'}
+                      </td>
+                      <td className="px-3 py-2">{row.feePerKg ?? row.price ?? '-'}</td>
+                      <td className="px-3 py-2">{row.amount}</td>
+                      <td className="px-3 py-2 font-medium">{row.balance}</td>
+                      <td className="max-w-64 px-3 py-2 text-gray-600">{row.detail || '-'}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          ) : null}
+        </section>
+      ) : null}
     </form>
   )
 }

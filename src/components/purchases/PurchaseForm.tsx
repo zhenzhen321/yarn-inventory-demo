@@ -8,6 +8,7 @@ import { ExpressionInput } from '@/components/ui/ExpressionInput'
 import { Select } from '@/components/ui/Select'
 import { resolveNumeric } from '@/lib/expression'
 import { LabelPrintButton, type LabelPrintOrder } from '@/components/labels/LabelPrintButton'
+import { OrderTraceLink } from '@/components/orders/OrderTraceLink'
 
 interface VariantOption {
   id: string
@@ -40,7 +41,7 @@ export function PurchaseForm({
   defaultHandler,
 }: {
   products: ProductOption[]
-  warehouses: { id: string; name: string }[]
+  warehouses: { id: string; name: string; type?: string }[]
   suppliers: { id: string; name: string }[]
   defaultHandler?: string
 }) {
@@ -159,11 +160,11 @@ export function PurchaseForm({
           </Select>
         </label>
         <label className="text-sm">
-          仓库
+          入库/直送地点
           <Select name="warehouseId" required>
             {warehouses.map((w) => (
               <option key={w.id} value={w.id}>
-                {w.name}
+                {w.name}{w.type === 'FACTORY' ? '（加工厂，供应商直送）' : ''}
               </option>
             ))}
           </Select>
@@ -308,7 +309,7 @@ export function PurchaseForm({
         {savedOrderNo && (
           <div className="flex flex-wrap items-center justify-between gap-3 rounded-lg border border-green-200 bg-green-50 p-3">
             <p className="text-sm font-medium text-green-700">
-              保存成功，单号：{savedOrderNo}
+              保存成功，单号：<OrderTraceLink orderNo={savedOrderNo} orderType="PURCHASE" />
             </p>
             {savedLabelOrder ? (
               <LabelPrintButton order={savedLabelOrder} label="打印本单标签" />

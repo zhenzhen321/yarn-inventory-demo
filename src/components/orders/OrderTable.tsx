@@ -1,6 +1,7 @@
 'use client'
 
-import { Fragment, useState } from 'react'
+import { Fragment, useEffect, useState } from 'react'
+import Link from 'next/link'
 import { Table } from '@/components/ui/Table'
 import { RevertButton } from '@/components/common/RevertButton'
 import { LabelPrintButton } from '@/components/labels/LabelPrintButton'
@@ -15,6 +16,9 @@ export interface OrderTableItem {
   price: string
   amount: string
   packages: number | null
+  lotId: string | null
+  lotNo: string | null
+  scanCode: string | null
 }
 
 export interface OrderTableRecord {
@@ -28,6 +32,8 @@ export interface OrderTableRecord {
   totalAmount: string
   freight: string
   note: string | null
+  reversedAt: string | null
+  reversedBy: string | null
   items: OrderTableItem[]
 }
 
@@ -40,11 +46,29 @@ function summarize(values: string[]) {
 export function OrderTable({
   orders,
   currentUserName,
+  initialExpandedOrderNo,
 }: {
   orders: OrderTableRecord[]
   currentUserName?: string
+  initialExpandedOrderNo?: string
 }) {
-  const [expandedIds, setExpandedIds] = useState<Set<string>>(() => new Set())
+  const [expandedIds, setExpandedIds] = useState<Set<string>>(() => {
+    const focused = orders.find((order) => order.orderNo === initialExpandedOrderNo)
+    return new Set(focused ? [focused.id] : [])
+  })
+
+  useEffect(() => {
+    if (!initialExpandedOrderNo) return
+    const focused = orders.find((order) => order.orderNo === initialExpandedOrderNo)
+    if (!focused) return
+    setExpandedIds((current) => new Set(current).add(focused.id))
+    requestAnimationFrame(() => {
+      document.getElementById(`order-record-${focused.id}`)?.scrollIntoView({
+        behavior: 'smooth',
+        block: 'start',
+      })
+    })
+  }, [initialExpandedOrderNo, orders])
 
   function toggle(orderId: string) {
     setExpandedIds((current) => {
@@ -65,7 +89,9 @@ export function OrderTable({
       {orders.map((order) => {
         const expanded = expandedIds.has(order.id)
         const detailsId = `order-record-details-${order.id}`
-        const canRevert = Boolean(currentUserName && currentUserName === order.handlerName)
+        const canRevert = Boolean(
+          !order.reversedAt && currentUserName && currentUserName === order.handlerName,
+        )
         const revertHref =
           order.orderType === 'PURCHASE'
             ? `/api/purchases/${order.id}`
@@ -73,7 +99,7 @@ export function OrderTable({
 
         return (
           <Fragment key={order.id}>
-            <tr className="border-b last:border-b-0">
+            <tr id={`order-record-${order.id}`} className="scroll-mt-24 border-b last:border-b-0">
               <td>
                 <button
                   type="button"
@@ -86,6 +112,7 @@ export function OrderTable({
                     {expanded ? '▼' : '▶'}
                   </span>
                   {order.orderNo}
+                  {order.reversedAt ? '（已撤回）' : ''}
                 </button>
               </td>
               <td>{order.counterpartyName}</td>
@@ -114,9 +141,15 @@ export function OrderTable({
                       <div><span className="text-gray-500">货款：</span>{order.totalAmount} 元</div>
                       <div><span className="text-gray-500">运费：</span>{order.freight} 元</div>
                       <div><span className="text-gray-500">备注：</span>{order.note || '无'}</div>
+                      <div>
+                        <span className="text-gray-500">状态：</span>
+                        {order.reversedAt
+                          ? `已由 ${order.reversedBy ?? '未知'} 撤回（原单保留）`
+                          : '有效'}
+                      </div>
                     </div>
                     <div className="flex flex-wrap gap-2">
-                      {order.orderType === 'PURCHASE' ? (
+                      {order.orderType === 'PURCHASE' && !order.reversedAt ? (
                         <LabelPrintButton
                           order={{
                             orderNo: order.orderNo,
@@ -124,7 +157,12 @@ export function OrderTable({
                               yarnName: item.yarnName,
                               spec: item.spec,
                               color: item.color,
+                              weight: item.weight,
+                              unit: item.unit,
                               packages: item.packages,
+                              batchNo: item.batchNo,
+                              lotNo: item.lotNo,
+                              scanCode: item.scanCode,
                             })),
                           }}
                           label="补打标签"
@@ -139,7 +177,7 @@ export function OrderTable({
                     <table className="w-full min-w-[780px] text-sm">
                       <thead>
                         <tr className="border-b bg-gray-50 text-left text-gray-600">
-                          {['品名', '支数', '色号', '单位', '批次', '重量', '单价', '金额', '包数'].map(
+                          {['品名', '支数', '色号', '单位', '批次', '内部批次', '重量', '单价', '金额', '件数'].map(
                             (header) => (
                               <th key={header} className="px-3 py-2 font-medium">{header}</th>
                             ),
@@ -154,6 +192,13 @@ export function OrderTable({
                             <td className="px-3 py-2">{item.color}</td>
                             <td className="px-3 py-2">{item.unit}</td>
                             <td className="px-3 py-2">{item.batchNo}</td>
+                            <td className="px-3 py-2">
+                              {item.lotId ? (
+                                <Link href={`/app/lots/${item.lotId}`} className="text-blue-700 hover:underline">
+                                  {item.lotNo}
+                                </Link>
+                              ) : '-'}
+                            </td>
                             <td className="px-3 py-2">{item.weight}</td>
                             <td className="px-3 py-2">{item.price}</td>
                             <td className="px-3 py-2">{item.amount}</td>

@@ -1,36 +1,123 @@
 import { Prisma, PrismaClient } from '@prisma/client'
+import {
+  ensureInventoryLot,
+  recordMovement,
+  refreshLotStatus,
+  subtractFromBalance,
+} from './lots'
 
-// 按重量比例分摊运费（末条补差，与 updatePurchaseFreight 同算法）
 function allocateFreight(
   items: { weight: Prisma.Decimal }[],
   freight: Prisma.Decimal,
 ): Prisma.Decimal[] {
-  const totalWeight = items.reduce((s, it) => s.plus(it.weight), new Prisma.Decimal(0))
+  const totalWeight = items.reduce((sum, item) => sum.plus(item.weight), new Prisma.Decimal(0))
   if (totalWeight.lessThanOrEqualTo(0)) throw new Error('买入单没有有效重量')
-  const arr = items.map((it) => freight.mul(it.weight).div(totalWeight).toDecimalPlaces(2))
-  const sum = arr.reduce((s, v) => s.plus(v), new Prisma.Decimal(0))
-  arr[arr.length - 1] = arr[arr.length - 1].plus(freight.minus(sum))
-  return arr
+  const result = items.map((item) =>
+    freight.mul(item.weight).div(totalWeight).toDecimalPlaces(2),
+  )
+  const allocated = result.reduce((sum, value) => sum.plus(value), new Prisma.Decimal(0))
+  result[result.length - 1] = result[result.length - 1].plus(freight.minus(allocated))
+  return result
 }
 
 export async function revertSettlement(db: PrismaClient, id: string) {
   return db.$transaction(async (tx) => {
-    const s = await tx.settlement.findUnique({ where: { id }, include: { counterparty: true } })
-    if (!s) throw new Error('结算记录不存在')
+    const settlement = await tx.settlement.findUnique({
+      where: { id },
+      include: { counterparty: true },
+    })
+    if (!settlement) throw new Error('结算记录不存在')
     await tx.settlement.delete({ where: { id } })
-    return s
+    return settlement
   })
 }
 
-export async function revertPurchase(db: PrismaClient, id: string) {
+export async function revertPurchase(db: PrismaClient, id: string, revertedBy = '未知') {
   return db.$transaction(async (tx) => {
     const order = await tx.purchaseOrder.findUnique({
       where: { id },
       include: { items: true, supplier: true },
     })
     if (!order) throw new Error('买入单不存在')
+    if (order.reversedAt) throw new Error('该买入单已经撤回')
 
-    const freightArr = allocateFreight(order.items, order.freight)
+    const activeTotal =
+      (
+        await tx.purchaseOrder.aggregate({
+          where: { supplierId: order.supplierId, reversedAt: null },
+          _sum: { totalAmount: true },
+        })
+      )._sum.totalAmount ?? new Prisma.Decimal(0)
+    const paid =
+      (
+        await tx.settlement.aggregate({
+          where: { side: 'PURCHASE', counterpartyId: order.supplierId },
+          _sum: { amount: true },
+        })
+      )._sum.amount ?? new Prisma.Decimal(0)
+    if (paid.greaterThan(activeTotal.minus(order.totalAmount))) {
+      throw new Error('撤回后该供应商已付超过应付，无法撤回')
+    }
+
+    const freight = allocateFreight(order.items, order.freight)
+    const exactItems = order.items.filter((item) => item.lotId)
+    for (let index = 0; index < exactItems.length; index++) {
+      const item = exactItems[index]
+      const originalIndex = order.items.findIndex((candidate) => candidate.id === item.id)
+      const [row, laterMovements, receipt] = await Promise.all([
+        tx.inventory.findFirst({
+          where: { lotId: item.lotId!, warehouseId: order.warehouseId, archived: false },
+        }),
+        tx.stockMovement.count({
+          where: {
+            lotId: item.lotId!,
+            NOT: {
+              type: 'PURCHASE_RECEIPT',
+              referenceId: order.id,
+              referenceItemId: item.id,
+            },
+          },
+        }),
+        tx.stockMovement.findFirst({
+          where: {
+            lotId: item.lotId!,
+            type: 'PURCHASE_RECEIPT',
+            referenceId: order.id,
+            referenceItemId: item.id,
+          },
+        }),
+      ])
+      if (
+        !row ||
+        laterMovements > 0 ||
+        !row.weight.equals(item.weight) ||
+        !row.cost.equals(item.amount)
+      ) {
+        throw new Error('该批货已被卖出、调拨、加工或盘点，无法撤回')
+      }
+      await subtractFromBalance(tx, row, item.weight, item.packages)
+      await tx.inventory.update({ where: { id: row.id }, data: { archived: true } })
+      await tx.inventoryLot.update({
+        where: { id: item.lotId! },
+        data: { status: 'ARCHIVED' },
+      })
+      await recordMovement(tx, {
+        lotId: item.lotId!,
+        type: 'REVERSAL',
+        referenceType: 'PURCHASE_REVERSAL',
+        referenceId: order.id,
+        referenceItemId: item.id,
+        fromWarehouseId: order.warehouseId,
+        weight: item.weight,
+        packages: item.packages,
+        goodsCost: item.amount,
+        freightCost: freight[originalIndex],
+        reversalOfId: receipt?.id,
+        occurredAt: new Date(),
+      })
+    }
+
+    const legacyItems = order.items.filter((item) => !item.lotId)
     const groups = new Map<
       string,
       {
@@ -39,11 +126,11 @@ export async function revertPurchase(db: PrismaClient, id: string) {
         weight: Prisma.Decimal
         cost: Prisma.Decimal
         freight: Prisma.Decimal
-        inventoryId?: string
+        packages: number | null
       }
     >()
-    for (let i = 0; i < order.items.length; i++) {
-      const item = order.items[i]
+    for (const item of legacyItems) {
+      const index = order.items.findIndex((candidate) => candidate.id === item.id)
       const key = `${item.variantId}|${item.batchId}`
       const group = groups.get(key) ?? {
         variantId: item.variantId,
@@ -51,13 +138,17 @@ export async function revertPurchase(db: PrismaClient, id: string) {
         weight: new Prisma.Decimal(0),
         cost: new Prisma.Decimal(0),
         freight: new Prisma.Decimal(0),
+        packages: 0,
       }
       group.weight = group.weight.plus(item.weight)
       group.cost = group.cost.plus(item.amount)
-      group.freight = group.freight.plus(freightArr[i])
+      group.freight = group.freight.plus(freight[index])
+      group.packages =
+        group.packages === null || item.packages === null
+          ? null
+          : group.packages + item.packages
       groups.set(key, group)
     }
-
     for (const group of groups.values()) {
       const row = await tx.inventory.findFirst({
         where: {
@@ -68,106 +159,176 @@ export async function revertPurchase(db: PrismaClient, id: string) {
           archived: false,
         },
       })
-      if (!row) throw new Error(`库存记录不存在：变体 ${group.variantId} 批次 ${group.batchId}`)
-      if (row.weight.lessThan(group.weight)) throw new Error('该批货已被卖出/调走，无法撤回')
-      group.inventoryId = row.id
-    }
-
-    const newTotal =
-      (
-        await tx.purchaseOrder.aggregate({
-          where: { supplierId: order.supplierId },
-          _sum: { totalAmount: true },
-        })
-      )._sum.totalAmount ?? new Prisma.Decimal(0)
-    const settled =
-      (
-        await tx.settlement.aggregate({
-          where: { side: 'PURCHASE', counterpartyId: order.supplierId },
-          _sum: { amount: true },
-        })
-      )._sum.amount ?? new Prisma.Decimal(0)
-    if (settled.greaterThan(newTotal.minus(order.totalAmount))) {
-      throw new Error('撤回后该供应商已付超过应付，无法撤回')
-    }
-
-    await tx.purchaseItem.deleteMany({ where: { orderId: order.id } })
-    await tx.purchaseOrder.delete({ where: { id: order.id } })
-    for (const group of groups.values()) {
-      await tx.inventory.update({
-        where: { id: group.inventoryId! },
-        data: {
-          weight: { decrement: group.weight },
-          cost: { decrement: group.cost },
-          freight: { decrement: group.freight },
-        },
+      if (!row || row.weight.lessThan(group.weight)) {
+        throw new Error('该历史汇总批次已被卖出或调走，无法撤回')
+      }
+      const lot = await ensureInventoryLot(tx, row)
+      await subtractFromBalance(tx, row, group.weight, group.packages)
+      await recordMovement(tx, {
+        lotId: lot.id,
+        type: 'REVERSAL',
+        referenceType: 'PURCHASE_REVERSAL',
+        referenceId: order.id,
+        fromWarehouseId: order.warehouseId,
+        weight: group.weight,
+        packages: group.packages,
+        goodsCost: group.cost,
+        freightCost: group.freight,
+        occurredAt: new Date(),
       })
+      await refreshLotStatus(tx, lot.id)
     }
-    return order
+
+    return tx.purchaseOrder.update({
+      where: { id: order.id },
+      data: { reversedAt: new Date(), reversedBy: revertedBy },
+      include: { items: true, supplier: true },
+    })
   })
 }
 
-export async function revertSale(db: PrismaClient, id: string) {
+export async function revertSale(db: PrismaClient, id: string, revertedBy = '未知') {
   return db.$transaction(async (tx) => {
     const order = await tx.saleOrder.findUnique({
       where: { id },
-      include: { items: true, customer: true },
+      include: {
+        customer: true,
+        items: { include: { allocations: true } },
+      },
     })
     if (!order) throw new Error('卖出单不存在')
-    const newTotal =
+    if (order.reversedAt) throw new Error('该卖出单已经撤回')
+
+    const activeTotal =
       (
         await tx.saleOrder.aggregate({
-          where: { customerId: order.customerId },
+          where: { customerId: order.customerId, reversedAt: null },
           _sum: { totalAmount: true },
         })
       )._sum.totalAmount ?? new Prisma.Decimal(0)
-    const settled =
+    const received =
       (
         await tx.settlement.aggregate({
           where: { side: 'SALE', counterpartyId: order.customerId },
           _sum: { amount: true },
         })
       )._sum.amount ?? new Prisma.Decimal(0)
-    if (settled.greaterThan(newTotal.minus(order.totalAmount))) {
+    if (received.greaterThan(activeTotal.minus(order.totalAmount))) {
       throw new Error('撤回后该客户已收超过应收，无法撤回')
     }
-    await tx.saleItem.deleteMany({ where: { orderId: order.id } })
-    await tx.saleOrder.delete({ where: { id: order.id } })
-    for (const it of order.items) {
-      const source = await tx.inventory.findUnique({ where: { id: it.inventoryId } })
-      if (!source) throw new Error(`原库存记录不存在：${it.inventoryId}`)
-      let targetId = source.id
-      if (source.archived) {
-        const active = await tx.inventory.findFirst({
+
+    for (const item of order.items) {
+      if (item.allocations.length > 0) {
+        for (const allocation of item.allocations) {
+          const source = allocation.inventoryId
+            ? await tx.inventory.findUnique({ where: { id: allocation.inventoryId } })
+            : null
+          if (!source) throw new Error(`原库存记录不存在：${allocation.inventoryId ?? '-'}`)
+          const target =
+            (await tx.inventory.findFirst({
+              where: {
+                lotId: allocation.lotId,
+                warehouseId: allocation.warehouseId,
+                processingFeeSettled: source.processingFeeSettled,
+                archived: false,
+              },
+            })) ?? source
+          const originalMovement = await tx.stockMovement.findFirst({
+            where: {
+              lotId: allocation.lotId,
+              type: 'SALE',
+              referenceId: order.id,
+              referenceItemId: item.id,
+            },
+          })
+          const restoredCost =
+            originalMovement?.goodsCost ??
+            allocation.weight.mul(allocation.unitCost).toDecimalPlaces(2)
+          const restoredFreight =
+            originalMovement?.freightCost ??
+            allocation.weight.mul(allocation.unitFreight).toDecimalPlaces(2)
+          await tx.inventory.update({
+            where: { id: target.id },
+            data: {
+              archived: false,
+              weight: target.weight.plus(allocation.weight).toDecimalPlaces(2),
+              packages:
+                allocation.packages === null
+                  ? target.packages
+                  : (target.packages ?? 0) + allocation.packages,
+              cost: target.cost.plus(restoredCost).toDecimalPlaces(2),
+              freight: target.freight.plus(restoredFreight).toDecimalPlaces(2),
+              version: { increment: 1 },
+            },
+          })
+          await tx.inventoryLot.update({
+            where: { id: allocation.lotId },
+            data: { status: 'AVAILABLE' },
+          })
+          await recordMovement(tx, {
+            lotId: allocation.lotId,
+            type: 'REVERSAL',
+            referenceType: 'SALE_REVERSAL',
+            referenceId: order.id,
+            referenceItemId: item.id,
+            toWarehouseId: allocation.warehouseId,
+            weight: allocation.weight,
+            packages: allocation.packages,
+            goodsCost: restoredCost,
+            freightCost: restoredFreight,
+            reversalOfId: originalMovement?.id,
+            occurredAt: new Date(),
+          })
+        }
+        continue
+      }
+
+      const source = await tx.inventory.findUnique({ where: { id: item.inventoryId } })
+      if (!source) throw new Error(`原库存记录不存在：${item.inventoryId}`)
+      const lot = await ensureInventoryLot(tx, source)
+      const target =
+        (await tx.inventory.findFirst({
           where: {
-            id: { not: source.id },
+            lotId: lot.id,
             warehouseId: source.warehouseId,
-            variantId: source.variantId,
-            batchId: source.batchId,
             processingFeeSettled: source.processingFeeSettled,
             archived: false,
           },
-        })
-        if (active) {
-          targetId = active.id
-        } else {
-          await tx.inventory.update({
-            where: { id: source.id },
-            data: { archived: false },
-          })
-        }
-      }
+        })) ?? source
+      const restoredCost = item.weight.mul(item.unitCost).toDecimalPlaces(2)
+      const restoredFreight = item.weight.mul(item.unitFreight).toDecimalPlaces(2)
       await tx.inventory.update({
-        where: { id: targetId },
+        where: { id: target.id },
         data: {
-          weight: { increment: it.weight },
-          cost: { increment: new Prisma.Decimal(it.weight).mul(it.unitCost).toDecimalPlaces(2) },
-          freight: {
-            increment: new Prisma.Decimal(it.weight).mul(it.unitFreight).toDecimalPlaces(2),
-          },
+          archived: false,
+          weight: target.weight.plus(item.weight).toDecimalPlaces(2),
+          packages:
+            item.packages === null ? target.packages : (target.packages ?? 0) + item.packages,
+          cost: target.cost.plus(restoredCost).toDecimalPlaces(2),
+          freight: target.freight.plus(restoredFreight).toDecimalPlaces(2),
+          version: { increment: 1 },
         },
       })
+      await tx.inventoryLot.update({ where: { id: lot.id }, data: { status: 'AVAILABLE' } })
+      await recordMovement(tx, {
+        lotId: lot.id,
+        type: 'REVERSAL',
+        referenceType: 'SALE_REVERSAL',
+        referenceId: order.id,
+        referenceItemId: item.id,
+        toWarehouseId: source.warehouseId,
+        weight: item.weight,
+        packages: item.packages,
+        goodsCost: restoredCost,
+        freightCost: restoredFreight,
+        occurredAt: new Date(),
+      })
     }
-    return order
+
+    return tx.saleOrder.update({
+      where: { id: order.id },
+      data: { reversedAt: new Date(), reversedBy: revertedBy },
+      include: { items: true, customer: true },
+    })
   })
 }

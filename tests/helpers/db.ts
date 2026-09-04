@@ -31,6 +31,12 @@ export function getTestDb(): PrismaClient {
 }
 
 export async function resetDb(client: PrismaClient): Promise<void> {
+  await client.saleAllocation.deleteMany()
+  await client.stockMovement.deleteMany()
+  await client.processingOutput.deleteMany()
+  await client.processingInput.deleteMany()
+  await client.processingFeeSettlement.deleteMany()
+  await client.processingJob.deleteMany()
   await client.processingReturnItem.deleteMany()
   await client.processingReturn.deleteMany()
   await client.stocktakeItem.deleteMany()
@@ -44,8 +50,8 @@ export async function resetDb(client: PrismaClient): Promise<void> {
   await client.settlement.deleteMany()
   await client.auditLog.deleteMany()
   await client.processingFeePayment.deleteMany()
-  await client.processingFeeSettlement.deleteMany()
   await client.inventory.deleteMany()
+  await client.inventoryLot.deleteMany()
   await client.batch.deleteMany()
   await client.yarnVariant.deleteMany()
   await client.counterparty.deleteMany()

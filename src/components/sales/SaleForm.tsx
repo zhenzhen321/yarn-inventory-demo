@@ -6,7 +6,9 @@ import { Button } from '@/components/ui/Button'
 import { Input } from '@/components/ui/Input'
 import { ExpressionInput } from '@/components/ui/ExpressionInput'
 import { Select } from '@/components/ui/Select'
+import { OrderTraceLink } from '@/components/orders/OrderTraceLink'
 import { resolveNumeric } from '@/lib/expression'
+import { getSaleInventoryChoices } from '@/lib/inventory-presentation'
 
 interface Option {
   id: string
@@ -23,15 +25,24 @@ interface InventoryRow {
   color: string | null
   unit: string
   batchNo: string
+  lotNo: string | null
+  scanCode: string | null
   weight: string
+  packages: number | null
   processingFeeSettled: boolean
 }
 
 interface Row {
+  yarnName: string
+  color: string
   inventoryId: string
   weight: string
   price: string
   packages: string
+}
+
+function emptyRow(): Row {
+  return { yarnName: '', color: '', inventoryId: '', weight: '', price: '', packages: '' }
 }
 
 export function SaleForm({
@@ -47,11 +58,11 @@ export function SaleForm({
 }) {
   const router = useRouter()
   const [warehouseId, setWarehouseId] = useState(warehouses[0]?.id ?? '')
-  const [rows, setRows] = useState<Row[]>([
-    { inventoryId: '', weight: '', price: '', packages: '' },
-  ])
+  const [rows, setRows] = useState<Row[]>([emptyRow()])
   const [message, setMessage] = useState('')
   const [savedOrderNo, setSavedOrderNo] = useState('')
+  const [scanCode, setScanCode] = useState('')
+  const [scanMessage, setScanMessage] = useState('')
 
   const warehouseType = warehouses.find((w) => w.id === warehouseId)?.type ?? 'WAREHOUSE'
   const available = useMemo(
@@ -63,13 +74,87 @@ export function SaleForm({
       ),
     [warehouseId, warehouseType, inventoryRows],
   )
+  const choices = useMemo(
+    () => getSaleInventoryChoices(available, warehouseId),
+    [available, warehouseId],
+  )
   const total = rows.reduce(
     (sum, r) => sum + (resolveNumeric(r.weight) ?? 0) * (Number(r.price) || 0),
     0,
   )
 
   function updateRow(idx: number, key: keyof Row, value: string) {
-    setRows((prev) => prev.map((r, i) => (i === idx ? { ...r, [key]: value } : r)))
+    setRows((prev) =>
+      prev.map((r, i) => {
+        if (i !== idx) return r
+        if (key === 'yarnName') {
+          return { ...emptyRow(), yarnName: value, price: r.price }
+        }
+        if (key === 'color') {
+          return { ...r, color: value, inventoryId: '', weight: '', packages: '' }
+        }
+        if (key !== 'inventoryId') return { ...r, [key]: value }
+        const selected = available.find((candidate) => candidate.id === value)
+        return {
+          ...r,
+          inventoryId: value,
+          weight: selected?.weight ?? '',
+          packages: selected?.packages?.toString() ?? '',
+        }
+      }),
+    )
+  }
+
+  function addScannedLot() {
+    const code = scanCode.trim()
+    if (!code) return
+    const matched = inventoryRows.find(
+      (row) =>
+        row.scanCode?.toUpperCase() === code.toUpperCase() ||
+        row.lotNo?.toUpperCase() === code.toUpperCase(),
+    )
+    if (!matched) {
+      setScanMessage('未找到该批次，请确认标签或改用手工选择')
+      return
+    }
+    if (!available.some((row) => row.id === matched.id)) {
+      setScanMessage(
+        matched.warehouseId !== warehouseId
+          ? `该批次当前在 ${matched.warehouseName}，不在所选仓库`
+          : '该加工厂批次尚未完成加工核算，不能销售',
+      )
+      return
+    }
+    if (rows.some((row) => row.inventoryId === matched.id)) {
+      setScanMessage('该批次已在本单中，无需重复扫描')
+      setScanCode('')
+      return
+    }
+    const nextRow: Row = {
+      yarnName: matched.yarnName,
+      color: matched.color ?? '未填色号',
+      inventoryId: matched.id,
+      weight: matched.weight,
+      price: '',
+      packages: matched.packages?.toString() ?? '',
+    }
+    setRows((current) => {
+      const emptyIndex = current.findIndex(
+        (row) =>
+          !row.yarnName &&
+          !row.color &&
+          !row.inventoryId &&
+          !row.weight &&
+          !row.price &&
+          !row.packages,
+      )
+      if (emptyIndex < 0) return [...current, nextRow]
+      return current.map((row, index) => (index === emptyIndex ? nextRow : row))
+    })
+    setScanCode('')
+    setScanMessage(
+      `已加入 ${matched.yarnName} · ${matched.lotNo ?? matched.batchNo}，默认全部 ${Number(matched.weight).toFixed(2)} kg`,
+    )
   }
 
   async function onSubmit(e: FormEvent<HTMLFormElement>) {
@@ -98,7 +183,7 @@ export function SaleForm({
     if (res.ok) {
       const data = await res.json()
       setSavedOrderNo(data.orderNo)
-      setRows([{ inventoryId: '', weight: '', price: '', packages: '' }])
+      setRows([emptyRow()])
       router.refresh()
     } else {
       const data = await res.json().catch(() => ({}))
@@ -134,7 +219,7 @@ export function SaleForm({
             value={warehouseId}
             onChange={(e) => {
               setWarehouseId(e.target.value)
-              setRows([{ inventoryId: '', weight: '', price: '', packages: '' }])
+              setRows([emptyRow()])
             }}
             required
           >
@@ -162,20 +247,77 @@ export function SaleForm({
         </label>
       </div>
 
+      <div className="rounded-lg border border-blue-200 bg-blue-50 p-3">
+        <label className="block text-sm font-medium text-blue-950">
+          扫码枪快速出库
+          <div className="mt-1 flex gap-2">
+            <Input
+              autoFocus
+              value={scanCode}
+              onChange={(event) => setScanCode(event.target.value)}
+              onKeyDown={(event) => {
+                if (event.key === 'Enter') {
+                  event.preventDefault()
+                  addScannedLot()
+                }
+              }}
+              placeholder="扫描标签二维码后按回车"
+              autoComplete="off"
+            />
+            <Button type="button" onClick={addScannedLot}>
+              加入
+            </Button>
+          </div>
+        </label>
+        <p className="mt-1 text-xs text-blue-800">
+          扫码默认卖出该批全部余量和件数；部分卖出时，直接修改下方重量和件数。
+        </p>
+        {scanMessage && <p className="mt-1 text-sm text-blue-900">{scanMessage}</p>}
+      </div>
+
       {rows.map((row, idx) => (
         <div
           key={idx}
-          className="grid gap-3 rounded border bg-white p-3 sm:grid-cols-2 lg:grid-cols-6"
+          className="grid gap-3 rounded border bg-white p-3 sm:grid-cols-2 xl:grid-cols-7"
         >
           <Select
-            value={row.inventoryId}
-            onChange={(e) => updateRow(idx, 'inventoryId', e.target.value)}
+            aria-label="选择品名"
+            value={row.yarnName}
+            onChange={(e) => updateRow(idx, 'yarnName', e.target.value)}
             required
           >
-            <option value="">选择库存</option>
-            {available.map((r) => (
+            <option value="">选择品名</option>
+            {choices.yarnNames.map((yarnName) => (
+              <option key={yarnName} value={yarnName}>
+                {yarnName}
+              </option>
+            ))}
+          </Select>
+          <Select
+            aria-label="选择色号"
+            value={row.color}
+            onChange={(e) => updateRow(idx, 'color', e.target.value)}
+            disabled={!row.yarnName}
+            required
+          >
+            <option value="">选择色号</option>
+            {choices.colorsFor(row.yarnName).map((color) => (
+              <option key={color} value={color}>
+                {color}
+              </option>
+            ))}
+          </Select>
+          <Select
+            aria-label="选择具体批次"
+            value={row.inventoryId}
+            onChange={(e) => updateRow(idx, 'inventoryId', e.target.value)}
+            disabled={!row.yarnName || !row.color}
+            required
+          >
+            <option value="">选择具体批次</option>
+            {choices.rowsFor(row.yarnName, row.color).map((r) => (
               <option key={r.id} value={r.id}>
-                {r.yarnName} {r.spec} {r.color ?? ''} {r.unit} 批次{r.batchNo}（可用{' '}
+                {r.spec} {r.unit} · {r.lotNo ?? '历史批次'} · 批次{r.batchNo}（可用{' '}
                 {Number(r.weight).toFixed(2)} kg）
               </option>
             ))}
@@ -215,10 +357,7 @@ export function SaleForm({
       <Button
         type="button"
         onClick={() =>
-          setRows((prev) => [
-            ...prev,
-            { inventoryId: '', weight: '', price: '', packages: '' },
-          ])
+          setRows((prev) => [...prev, emptyRow()])
         }
       >
         加一行
@@ -227,7 +366,9 @@ export function SaleForm({
       <div className="mt-8 space-y-3 border-t pt-6">
         <p className="text-sm">合计：¥{total.toFixed(2)}</p>
         {savedOrderNo && (
-          <p className="text-sm text-green-600">保存成功，单号：{savedOrderNo}</p>
+          <p className="text-sm text-green-600">
+            保存成功，单号：<OrderTraceLink orderNo={savedOrderNo} orderType="SALE" />
+          </p>
         )}
         {message && <p className="text-sm text-red-600">{message}</p>}
         <div className="flex justify-end">

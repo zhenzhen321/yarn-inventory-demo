@@ -1,14 +1,17 @@
 import { prisma } from '@/lib/prisma'
 import { Table } from '@/components/ui/Table'
 import { getInventoryValuation } from '@/services/reports'
+import { OrderTraceLink } from '@/components/orders/OrderTraceLink'
 
 export default async function DashboardPage() {
   const [inventory, recent, valuation, stocktakes, warehouses] = await Promise.all([
     prisma.inventory.findMany({
+      where: { archived: false, weight: { gt: 0 } },
       include: { warehouse: true, variant: { include: { yarn: true } }, batch: true },
       orderBy: [{ warehouse: { name: 'asc' } }, { variant: { yarn: { name: 'asc' } } }],
     }),
     prisma.purchaseOrder.findMany({
+      where: { reversedAt: null },
       orderBy: { createdAt: 'desc' },
       take: 5,
       include: { supplier: true, warehouse: true },
@@ -76,7 +79,7 @@ export default async function DashboardPage() {
       <Table headers={['单号', '日期', '供应商', '仓库', '经办人', '总额 (元)']}>
         {recent.map((o) => (
           <tr key={o.id}>
-            <td>{o.orderNo}</td>
+            <td><OrderTraceLink orderNo={o.orderNo} orderType="PURCHASE" /></td>
             <td>{o.date.toISOString().slice(0, 10)}</td>
             <td>{o.supplier.name}</td>
             <td>{o.warehouse.name}</td>

@@ -17,6 +17,7 @@ export default async function OrdersPage({
     counterpartyId?: string
     q?: string
     yarnQ?: string
+    focus?: string
   }>
 }) {
   const filters = await searchParams
@@ -58,6 +59,7 @@ export default async function OrdersPage({
       <p className="text-sm text-gray-600">共 {rows.length} 条记录</p>
       <OrderTable
         currentUserName={user?.name}
+        initialExpandedOrderNo={filters.focus}
         orders={rows.map((order) => ({
           id: order.id,
           orderType: order.orderType,
@@ -69,6 +71,8 @@ export default async function OrdersPage({
           totalAmount: order.totalAmount.toString(),
           freight: order.freight.toString(),
           note: order.note,
+          reversedAt: order.reversedAt?.toISOString() ?? null,
+          reversedBy: order.reversedBy,
           items: order.items.map((item) => ({
             yarnName: item.yarnName,
             spec: item.spec,
@@ -79,6 +83,9 @@ export default async function OrdersPage({
             price: item.price.toString(),
             amount: item.amount.toString(),
             packages: item.packages,
+            lotId: item.lotId,
+            lotNo: item.lotNo,
+            scanCode: item.scanCode,
           })),
         }))}
       />

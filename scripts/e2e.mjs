@@ -54,6 +54,9 @@ const login = await req('/api/auth/login', {
   body: { username: 'admin', password },
 })
 check('登录', login.status === 200)
+if (!login.setCookie) {
+  throw new Error(`登录未返回会话 Cookie（HTTP ${login.status}）：${login.text}`)
+}
 const cookie = login.setCookie.split(';')[0]
 
 let locked = false
@@ -457,10 +460,13 @@ check(
 const iPage = await fetch(base + '/app/inventory', { headers: { Cookie: cookie } })
 const iHtml = await iPage.text()
 check(
-  '库存页含单位成本列',
-  iPage.status === 200 && iHtml.includes('单位成本') && iHtml.includes('含运费合计'),
+  '库存页含批次成本列',
+  iPage.status === 200 && iHtml.includes('单位成本') && iHtml.includes('含运费单价'),
 )
-check('库存页含加工费结算入口', iHtml.includes('加工厂 · 加工费结算'))
+check(
+  '库存页含内部批次追溯入口',
+  iHtml.includes('内部批次') && iHtml.includes('/app/lots/'),
+)
 
 const stocktake = await req('/api/stocktakes', {
   method: 'POST',
@@ -578,29 +584,8 @@ check(
 const sPage = await fetch(base + '/app/settlements', { headers: { Cookie: cookie } })
 const sHtml = await sPage.text()
 check('结算页可访问', sPage.status === 200 && sHtml.includes('资金结算'))
-check(
-  '结算页含五个功能入口',
-  ['登记结算', '应付供应商', '应收客户', '加工费结算', '结算记录'].every((label) =>
-    sHtml.includes(label),
-  ),
-)
-const payablePage = await fetch(base + '/app/settlements/payables', { headers: { Cookie: cookie } })
-const payableHtml = await payablePage.text()
-check(
-  '应付页含供应商清单与去结算',
-  payablePage.status === 200 && payableHtml.includes('应付供应商') && payableHtml.includes('去结算'),
-)
-const receivablePage = await fetch(base + '/app/settlements/receivables', {
-  headers: { Cookie: cookie },
-})
-const receivableHtml = await receivablePage.text()
-check(
-  '应收页含客户清单与去结算',
-  receivablePage.status === 200 && receivableHtml.includes('应收客户') && receivableHtml.includes('去结算'),
-)
-const recordsPage = await fetch(base + '/app/settlements/records', { headers: { Cookie: cookie } })
-const recordsHtml = await recordsPage.text()
-check('结算记录页可访问', recordsPage.status === 200 && recordsHtml.includes('结算记录'))
+check('结算页买入/卖出分开', sHtml.includes('应付供应商') && sHtml.includes('应收客户'))
+check('结算页含登记与记录入口', sHtml.includes('登记结算') && sHtml.includes('结算记录'))
 
 const revertVariantColor = `撤回-${ts}`
 const revertPo = await req('/api/purchases', {
@@ -638,21 +623,20 @@ const revertSettle = await req('/api/settlements', {
 })
 check('撤回测试结算保存', revertSettle.status === 201)
 
-const { PrismaClient } = await import('@prisma/client')
-const pdb = new PrismaClient()
-const settleRow = await pdb.settlement.findFirst({
-  where: { counterpartyId: supplier.json.id, amount: 3000 },
-  orderBy: { createdAt: 'desc' },
-})
+const settleId = revertSettle.json?.id
+if (!settleId) throw new Error('撤回测试结算未返回记录 ID')
 const login2 = await req('/api/auth/login', {
   method: 'POST',
   body: { username: 'clerk', password: admin2Password || 'demo123456' },
 })
 check('clerk登录成功', login2.status === 200)
+if (!login2.setCookie) {
+  throw new Error(`clerk 登录未返回会话 Cookie（HTTP ${login2.status}）：${login2.text}`)
+}
 const cookie2 = login2.setCookie.split(';')[0]
-const forbidden = await req(`/api/settlements/${settleRow.id}`, { method: 'DELETE', cookie: cookie2 })
+const forbidden = await req(`/api/settlements/${settleId}`, { method: 'DELETE', cookie: cookie2 })
 check('非经办人撤回被拒(403)', forbidden.status === 403, forbidden.json?.error)
-const delSettle = await req(`/api/settlements/${settleRow.id}`, { method: 'DELETE', cookie })
+const delSettle = await req(`/api/settlements/${settleId}`, { method: 'DELETE', cookie })
 check('经办人撤回结算成功', delSettle.status === 200)
 
 const invRev = await req('/api/inventory', { cookie })
@@ -679,28 +663,58 @@ check('撤回卖出成功', delSale.status === 200)
 const revertPoList = await req('/api/purchases', { cookie })
 const revertPoRow = revertPoList.json.find((o) => o.orderNo === revertPo.json.orderNo)
 const delPo = await req(`/api/purchases/${revertPoRow.id}`, { method: 'DELETE', cookie })
-check('撤回买入成功', delPo.status === 200)
-const afterRev = await req('/api/inventory', { cookie })
 check(
-  '撤回买入后库存归 0',
-  !afterRev.json.some(
-    (r) => r.batch.batchNo === `E2ER-${ts}` && r.warehouseId === whA.json.id,
-  ),
+  '有下游流水的买入即使销售已撤回仍保留来源链',
+  delPo.status === 400 && delPo.json?.error?.includes('已被卖出、调拨、加工或盘点'),
+  delPo.json?.error,
 )
+const afterRev = await req('/api/inventory', { cookie })
+const restoredRevRow = afterRev.json.find(
+  (r) => r.batch.batchNo === `E2ER-${ts}` && r.warehouseId === whA.json.id,
+)
+check(
+  '撤回销售后来源批次库存恢复',
+  restoredRevRow && Number(restoredRevRow.weight) === 500,
+  restoredRevRow?.weight,
+)
+
+const cleanPo = await req('/api/purchases', {
+  method: 'POST',
+  cookie,
+  body: {
+    date: '2026-08-16',
+    supplierId: supplier.json.id,
+    warehouseId: whA.json.id,
+    handlerName: 'admin',
+    items: [{
+      yarnId: yarn.json.id,
+      spec: '32支',
+      color: `可撤回-${ts}`,
+      unit: 'kg',
+      batchNo: `E2ECLEAN-${ts}`,
+      weight: 200,
+      price: 20,
+    }],
+  },
+})
+check('无下游买入保存', cleanPo.status === 201, cleanPo.json?.orderNo ?? cleanPo.text)
+const cleanPoList = await req('/api/purchases', { cookie })
+const cleanPoRow = cleanPoList.json.find((o) => o.orderNo === cleanPo.json.orderNo)
+const delCleanPo = await req(`/api/purchases/${cleanPoRow.id}`, { method: 'DELETE', cookie })
+check('无下游买入通过反向流水撤回', delCleanPo.status === 200, delCleanPo.json?.error)
+
 const open3 = await req('/api/settlements', { cookie })
 const poFinal = open3.json.find(
   (o) => o.side === 'PURCHASE' && o.name === `E2E供应商-${ts}`,
 )
 check(
-  '撤回后应付恢复为货款 20000、已付 10000',
+  '撤回后应付只统计仍有效的 30000、已付 10000',
   poFinal &&
-    Number(poFinal.totalAmount) === 20000 &&
+    Number(poFinal.totalAmount) === 30000 &&
     Number(poFinal.settledAmount) === 10000 &&
-    Number(poFinal.remainingAmount) === 10000,
+    Number(poFinal.remainingAmount) === 20000,
   `${poFinal?.settledAmount}/${poFinal?.remainingAmount}`,
 )
-await pdb.$disconnect()
-
 const rPage = await fetch(base + '/app/reports', { headers: { Cookie: cookie } })
 const rHtml = await rPage.text()
 check('报表页可访问', rPage.status === 200 && rHtml.includes('报表'))

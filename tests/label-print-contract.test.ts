@@ -10,22 +10,47 @@ const purchaseSource = readFileSync(
   path.resolve(process.cwd(), 'src', 'components', 'purchases', 'PurchaseForm.tsx'),
   'utf8',
 )
+const saleSource = readFileSync(
+  path.resolve(process.cwd(), 'src', 'components', 'sales', 'SaleForm.tsx'),
+  'utf8',
+)
 const orderTableSource = readFileSync(
   path.resolve(process.cwd(), 'src', 'components', 'orders', 'OrderTable.tsx'),
   'utf8',
 )
+const purchaseApiSource = readFileSync(
+  path.resolve(process.cwd(), 'src', 'app', 'api', 'purchases', 'route.ts'),
+  'utf8',
+)
 
-describe('通用入库标签打印', () => {
-  it('标签只展示单号、品名、支数和色号', () => {
-    for (const field of ['order.orderNo', 'item.yarnName', 'item.spec', 'item.color']) {
+describe('独立批次二维码标签', () => {
+  it('标签包含品名、规格色号、批次、重量、件数和内部批次号', () => {
+    for (const field of [
+      'order.orderNo',
+      'item.yarnName',
+      'item.spec',
+      'item.color',
+      'item.batchNo',
+      'item.weight',
+      'item.unit',
+      'item.packages',
+      'item.lotNo',
+    ]) {
       expect(componentSource).toContain(field)
     }
-    for (const label of ['支数', '色号']) {
-      expect(componentSource).toContain(label)
-    }
+    expect(componentSource).toContain('件')
+    expect(purchaseApiSource).toContain('batchNo: item.batch.batchNo')
+    expect(purchaseApiSource).toContain('lotNo: item.lot?.lotNo')
   })
 
-  it('支持常用尺寸、自定义毫米尺寸和本机设置记忆', () => {
+  it('二维码在浏览器本地生成，不依赖外部二维码网站', () => {
+    expect(componentSource).toContain("import QRCode from 'qrcode'")
+    expect(componentSource).toContain('QRCode.toDataURL(scanCode')
+    expect(componentSource).toContain('item.scanCode')
+    expect(componentSource).not.toContain('api.qrserver.com')
+  })
+
+  it('支持常用毫米尺寸、自定义设置和本机记忆', () => {
     for (const size of ['40 × 30 mm', '50 × 30 mm', '60 × 40 mm']) {
       expect(componentSource).toContain(size)
     }
@@ -34,16 +59,27 @@ describe('通用入库标签打印', () => {
     expect(componentSource).toContain('@page')
     expect(componentSource).toContain('settings.width')
     expect(componentSource).toContain('settings.height')
+    expect(componentSource).toContain('layoutVersion: SETTINGS_VERSION')
   })
 
-  it('保存买入后可打印，并能从出入库记录补打', () => {
+  it('默认每个内部批次只打印一张，而不是按件数复制标签', () => {
+    expect(componentSource).toContain('return order.items.map(() => 1)')
+    expect(componentSource).toContain('默认每个批次一张')
+    expect(componentSource).toContain('一批只贴一个标签')
+  })
+
+  it('采购保存后可立即打印，也可从有效历史订单补打', () => {
     expect(purchaseSource).toContain('打印本单标签')
     expect(orderTableSource).toContain('补打标签')
-    expect(orderTableSource).toContain("order.orderType === 'PURCHASE'")
+    expect(orderTableSource).toContain("order.orderType === 'PURCHASE' && !order.reversedAt")
+    expect(orderTableSource).toContain('scanCode: item.scanCode')
   })
 
-  it('默认打印份数取包数，未填包数时为一张', () => {
-    expect(componentSource).toContain('item.packages && item.packages > 0')
-    expect(componentSource).toContain(': 1')
+  it('扫码枪销售按内部扫码码匹配，并默认整批重量和件数', () => {
+    expect(saleSource).toContain('扫码枪快速出库')
+    expect(saleSource).toContain("event.key === 'Enter'")
+    expect(saleSource).toContain('row.scanCode?.toUpperCase()')
+    expect(saleSource).toContain('weight: matched.weight')
+    expect(saleSource).toContain("packages: matched.packages?.toString() ?? ''")
   })
 })

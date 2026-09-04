@@ -19,6 +19,7 @@ describe('出入库记录简洁视图', () => {
     expect(source).toContain('aria-expanded={expanded}')
     expect(source).toContain('onClick={() => toggle(order.id)}')
     expect(source).toContain('expandedIds')
+    expect(source).toContain('initialExpandedOrderNo')
   })
 
   it('展开区保留订单信息、货品明细和撤回操作', () => {
@@ -33,9 +34,11 @@ describe('出入库记录简洁视图', () => {
       '备注：',
       '品名',
       '批次',
+      '内部批次',
       '重量',
       '单价',
-      '包数',
+      '件数',
+      '原单保留',
       '撤回本单',
     ]) {
       expect(source).toContain(label)

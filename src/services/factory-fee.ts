@@ -148,6 +148,7 @@ export interface FactoryStatementRow {
   color: string
   unit: string
   batchNo: string
+  lots: { id: string; lotNo: string }[]
   inputWeight: Prisma.Decimal | null
   outputWeight: Prisma.Decimal | null
   feePerKg: Prisma.Decimal | null
@@ -164,7 +165,14 @@ export async function getFactoryStatement(
     db.processingFeeSettlement.findMany({
       where: { warehouseId: factoryId },
       orderBy: [{ createdAt: 'asc' }, { id: 'asc' }],
-      include: { variant: { include: { yarn: true } } },
+      include: {
+        variant: { include: { yarn: true } },
+        processingJob: {
+          include: {
+            outputs: { include: { lot: { select: { id: true, lotNo: true } } } },
+          },
+        },
+      },
     }),
     db.processingFeePayment.findMany({
       where: { factoryId },
@@ -193,6 +201,7 @@ export async function getFactoryStatement(
         color: s.variant.color,
         unit: s.variant.unit,
         batchNo: s.batchNo,
+        lots: s.processingJob?.outputs.map((output) => output.lot) ?? [],
         inputWeight: s.inputWeight,
         outputWeight: s.outputWeight,
         feePerKg: s.feePerKg,
@@ -212,6 +221,7 @@ export async function getFactoryStatement(
         color: '',
         unit: '',
         batchNo: '',
+        lots: [],
         inputWeight: null,
         outputWeight: null,
         feePerKg: null,

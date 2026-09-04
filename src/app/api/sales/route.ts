@@ -33,6 +33,7 @@ export async function POST(req: Request) {
 
 export async function GET() {
   const orders = await prisma.saleOrder.findMany({
+    where: { reversedAt: null },
     orderBy: { createdAt: 'desc' },
     take: 50,
     include: { customer: true, warehouse: true },

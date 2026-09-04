@@ -29,11 +29,11 @@ export async function createSettlement(db: PrismaClient, input: SettlementInput)
     const total =
       input.side === 'PURCHASE'
         ? ((await tx.purchaseOrder.aggregate({
-            where: { supplierId: input.counterpartyId },
+            where: { supplierId: input.counterpartyId, reversedAt: null },
             _sum: { totalAmount: true },
           }))._sum.totalAmount ?? new Prisma.Decimal(0))
         : ((await tx.saleOrder.aggregate({
-            where: { customerId: input.counterpartyId },
+            where: { customerId: input.counterpartyId, reversedAt: null },
             _sum: { totalAmount: true },
           }))._sum.totalAmount ?? new Prisma.Decimal(0))
     const agg = await tx.settlement.aggregate({
@@ -72,8 +72,8 @@ export interface CounterpartySummary {
 async function buildSummary(db: PrismaClient, side: SettlementSide): Promise<CounterpartySummary[]> {
   const orders =
     side === 'PURCHASE'
-      ? await db.purchaseOrder.findMany({ include: { supplier: true } })
-      : await db.saleOrder.findMany({ include: { customer: true } })
+      ? await db.purchaseOrder.findMany({ where: { reversedAt: null }, include: { supplier: true } })
+      : await db.saleOrder.findMany({ where: { reversedAt: null }, include: { customer: true } })
   const settledRows = await db.settlement.findMany({
     where: { side },
     select: { counterpartyId: true, amount: true },
@@ -231,6 +231,7 @@ export interface StatementRow {
   color: string
   unit: string
   batchNo: string
+  lots: { id: string; lotNo: string }[]
   weight: Prisma.Decimal | null
   price: Prisma.Decimal | null
   amount: Prisma.Decimal
@@ -245,19 +246,32 @@ export async function getCounterpartyStatement(
 ): Promise<StatementRow[]> {
   const [purchases, sales, settlements] = await Promise.all([
     db.purchaseOrder.findMany({
-      where: { supplierId: counterpartyId },
-      orderBy: [{ date: 'asc' }, { createdAt: 'asc' }],
-      include: {
-        items: { include: { variant: { include: { yarn: true } }, batch: true } },
-      },
-    }),
-    db.saleOrder.findMany({
-      where: { customerId: counterpartyId },
+      where: { supplierId: counterpartyId, reversedAt: null },
       orderBy: [{ date: 'asc' }, { createdAt: 'asc' }],
       include: {
         items: {
           include: {
-            inventory: { include: { variant: { include: { yarn: true } }, batch: true } },
+            variant: { include: { yarn: true } },
+            batch: true,
+            lot: { select: { id: true, lotNo: true } },
+          },
+        },
+      },
+    }),
+    db.saleOrder.findMany({
+      where: { customerId: counterpartyId, reversedAt: null },
+      orderBy: [{ date: 'asc' }, { createdAt: 'asc' }],
+      include: {
+        items: {
+          include: {
+            inventory: {
+              include: {
+                variant: { include: { yarn: true } },
+                batch: true,
+                lot: { select: { id: true, lotNo: true } },
+              },
+            },
+            allocations: { include: { lot: { select: { id: true, lotNo: true } } } },
           },
         },
       },
@@ -274,6 +288,7 @@ export async function getCounterpartyStatement(
     color: string
     unit: string
     batchNo: string
+    lots: { id: string; lotNo: string }[]
     weight: Prisma.Decimal | null
     price: Prisma.Decimal | null
     amount: Prisma.Decimal
@@ -297,6 +312,7 @@ export async function getCounterpartyStatement(
       color: it.variant.color,
       unit: it.variant.unit,
       batchNo: it.batch.batchNo,
+      lots: it.lot ? [{ id: it.lot.id, lotNo: it.lot.lotNo }] : [],
       weight: it.weight,
       price: it.price,
       amount: it.amount,
@@ -313,16 +329,24 @@ export async function getCounterpartyStatement(
     })
   }
   for (const o of sales) {
-    const items = o.items.map((it) => ({
-      yarnName: it.inventory.variant.yarn.name,
-      spec: it.inventory.variant.spec,
-      color: it.inventory.variant.color,
-      unit: it.inventory.variant.unit,
-      batchNo: it.inventory.batch.batchNo,
-      weight: it.weight,
-      price: it.price,
-      amount: it.amount,
-    }))
+    const items = o.items.map((it) => {
+      const candidates = [
+        ...it.allocations.map((allocation) => allocation.lot),
+        ...(it.inventory.lot ? [it.inventory.lot] : []),
+      ]
+      const lots = [...new Map(candidates.map((lot) => [lot.id, lot])).values()]
+      return {
+        yarnName: it.inventory.variant.yarn.name,
+        spec: it.inventory.variant.spec,
+        color: it.inventory.variant.color,
+        unit: it.inventory.variant.unit,
+        batchNo: it.inventory.batch.batchNo,
+        lots,
+        weight: it.weight,
+        price: it.price,
+        amount: it.amount,
+      }
+    })
     events.push({
       date: o.date,
       seq: seq++,
@@ -362,6 +386,7 @@ export async function getCounterpartyStatement(
               color: '',
               unit: '',
               batchNo: '',
+              lots: [],
               weight: null,
               price: null,
               amount: e.amountDelta,
@@ -380,6 +405,7 @@ export async function getCounterpartyStatement(
         color: it.color,
         unit: it.unit,
         batchNo: it.batchNo,
+        lots: it.lots,
         weight: it.weight,
         price: it.price,
         amount: it.amount,
