@@ -2,6 +2,7 @@ import { prisma } from '@/lib/prisma'
 import { ReportPageHeader } from '@/components/reports/ReportPageHeader'
 import { Table } from '@/components/ui/Table'
 import { getSettlementRecords } from '@/services/settlement'
+import { formatBusinessDate } from '@/lib/business-date'
 
 export default async function SettlementRecordsReportPage() {
   const records = await getSettlementRecords(prisma)
@@ -17,7 +18,7 @@ export default async function SettlementRecordsReportPage() {
           <tr key={record.id}>
             <td>{record.side === 'PURCHASE' ? '买入应付' : '卖出应收'}</td>
             <td>{record.counterpartyName}</td>
-            <td>{record.date.toISOString().slice(0, 10)}</td>
+            <td>{formatBusinessDate(record.date)}</td>
             <td>{record.amount.toString()}</td>
             <td>{record.method ?? '-'}</td>
             <td>{record.handlerName}</td>

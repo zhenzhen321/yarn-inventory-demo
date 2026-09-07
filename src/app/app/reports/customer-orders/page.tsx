@@ -3,6 +3,7 @@ import { OrderQueryPanel } from '@/components/reports/OrderQueryPanel'
 import { ReportPageHeader } from '@/components/reports/ReportPageHeader'
 import { ReportOrderTable } from '@/components/reports/ReportOrderTable'
 import { getCustomerOrders } from '@/services/reports'
+import { formatBusinessDate } from '@/lib/business-date'
 
 export default async function CustomerOrdersReportPage({
   searchParams,
@@ -36,7 +37,7 @@ export default async function CustomerOrdersReportPage({
         orders={orders.map((order) => ({
           id: order.id,
           orderNo: order.orderNo,
-          date: order.date.toISOString().slice(0, 10),
+          date: formatBusinessDate(order.date),
           warehouseName: order.warehouseName,
           handlerName: order.handlerName,
           counterpartyName: order.counterpartyName,

@@ -2,6 +2,7 @@ import Link from 'next/link'
 import { prisma } from '@/lib/prisma'
 import { Table } from '@/components/ui/Table'
 import { OrderTraceLink } from '@/components/orders/OrderTraceLink'
+import { formatBusinessDate } from '@/lib/business-date'
 
 export default async function PurchasesPage() {
   const orders = await prisma.purchaseOrder.findMany({
@@ -24,7 +25,7 @@ export default async function PurchasesPage() {
         {orders.map((o) => (
           <tr key={o.id}>
             <td><OrderTraceLink orderNo={o.orderNo} orderType="PURCHASE" /></td>
-            <td>{o.date.toISOString().slice(0, 10)}</td>
+            <td>{formatBusinessDate(o.date)}</td>
             <td>{o.supplier.name}</td>
             <td>{o.warehouse.name}</td>
             <td>{o.handlerName}</td>

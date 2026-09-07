@@ -1,24 +1,12 @@
 import { Prisma, PrismaClient } from '@prisma/client'
+import { allocateAmountByWeight } from '@/lib/money'
+import { businessDateFromInput, businessDateToday } from '@/lib/business-date'
 import {
   ensureInventoryLot,
   recordMovement,
   refreshLotStatus,
   subtractFromBalance,
 } from './lots'
-
-function allocateFreight(
-  items: { weight: Prisma.Decimal }[],
-  freight: Prisma.Decimal,
-): Prisma.Decimal[] {
-  const totalWeight = items.reduce((sum, item) => sum.plus(item.weight), new Prisma.Decimal(0))
-  if (totalWeight.lessThanOrEqualTo(0)) throw new Error('买入单没有有效重量')
-  const result = items.map((item) =>
-    freight.mul(item.weight).div(totalWeight).toDecimalPlaces(2),
-  )
-  const allocated = result.reduce((sum, value) => sum.plus(value), new Prisma.Decimal(0))
-  result[result.length - 1] = result[result.length - 1].plus(freight.minus(allocated))
-  return result
-}
 
 export async function revertSettlement(db: PrismaClient, id: string) {
   return db.$transaction(async (tx) => {
@@ -34,6 +22,7 @@ export async function revertSettlement(db: PrismaClient, id: string) {
 
 export async function revertPurchase(db: PrismaClient, id: string, revertedBy = '未知') {
   return db.$transaction(async (tx) => {
+    const reversalDate = businessDateFromInput(businessDateToday())
     const order = await tx.purchaseOrder.findUnique({
       where: { id },
       include: { items: true, supplier: true },
@@ -59,7 +48,10 @@ export async function revertPurchase(db: PrismaClient, id: string, revertedBy = 
       throw new Error('撤回后该供应商已付超过应付，无法撤回')
     }
 
-    const freight = allocateFreight(order.items, order.freight)
+    const freight = allocateAmountByWeight(
+      order.items.map((item) => item.weight),
+      order.freight,
+    )
     const exactItems = order.items.filter((item) => item.lotId)
     for (let index = 0; index < exactItems.length; index++) {
       const item = exactItems[index]
@@ -113,7 +105,7 @@ export async function revertPurchase(db: PrismaClient, id: string, revertedBy = 
         goodsCost: item.amount,
         freightCost: freight[originalIndex],
         reversalOfId: receipt?.id,
-        occurredAt: new Date(),
+        occurredAt: reversalDate,
       })
     }
 
@@ -174,7 +166,7 @@ export async function revertPurchase(db: PrismaClient, id: string, revertedBy = 
         packages: group.packages,
         goodsCost: group.cost,
         freightCost: group.freight,
-        occurredAt: new Date(),
+        occurredAt: reversalDate,
       })
       await refreshLotStatus(tx, lot.id)
     }
@@ -189,6 +181,7 @@ export async function revertPurchase(db: PrismaClient, id: string, revertedBy = 
 
 export async function revertSale(db: PrismaClient, id: string, revertedBy = '未知') {
   return db.$transaction(async (tx) => {
+    const reversalDate = businessDateFromInput(businessDateToday())
     const order = await tx.saleOrder.findUnique({
       where: { id },
       include: {
@@ -277,7 +270,7 @@ export async function revertSale(db: PrismaClient, id: string, revertedBy = '未
             goodsCost: restoredCost,
             freightCost: restoredFreight,
             reversalOfId: originalMovement?.id,
-            occurredAt: new Date(),
+            occurredAt: reversalDate,
           })
         }
         continue
@@ -321,7 +314,7 @@ export async function revertSale(db: PrismaClient, id: string, revertedBy = '未
         packages: item.packages,
         goodsCost: restoredCost,
         freightCost: restoredFreight,
-        occurredAt: new Date(),
+        occurredAt: reversalDate,
       })
     }
 

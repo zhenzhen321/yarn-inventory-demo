@@ -113,13 +113,39 @@ describe('买入入库', () => {
     expect(f2?.freight.toString()).toBe('40')
   })
 
+  it('买入保存时库存、内部批次和入库流水的运费合计精确等于订单运费', async () => {
+    const base = await createBase()
+    const created = await createPurchase(db, {
+      date: new Date('2026-09-06'),
+      supplierId: base.supplierId,
+      warehouseId: base.warehouseA,
+      handlerName: '刚',
+      freight: 100,
+      items: [
+        { variantId: base.variantId, batchNo: 'F-SAVE-1', weight: 3000, price: 10 },
+        { variantId: base.variantId, batchNo: 'F-SAVE-2', weight: 1, price: 10 },
+      ],
+    })
+
+    const lotIds = created.items.map((item) => item.lotId!)
+    const inventories = await db.inventory.findMany({ where: { lotId: { in: lotIds } } })
+    const lots = await db.inventoryLot.findMany({ where: { id: { in: lotIds } } })
+    const movements = await db.stockMovement.findMany({
+      where: { referenceType: 'PURCHASE', referenceId: created.id },
+    })
+
+    expect(inventories.reduce((total, row) => total + Number(row.freight), 0)).toBe(100)
+    expect(lots.reduce((total, row) => total + Number(row.freightCost), 0)).toBe(100)
+    expect(movements.reduce((total, row) => total + Number(row.freightCost), 0)).toBe(100)
+  })
+
   it('库存发生卖出后禁止修改原买入运费', async () => {
     const base = await createBase()
     const order = await createPurchase(db, {
       date: new Date('2026-08-01'),
       supplierId: base.supplierId,
       warehouseId: base.warehouseA,
-      handlerName: 'admin',
+      handlerName: '刚',
       items: [{ variantId: base.variantId, batchNo: 'F-MOVED', weight: 100, price: 10 }],
     })
     const rows = await getInventoryRows(db, { warehouseId: base.warehouseA })
@@ -127,7 +153,7 @@ describe('买入入库', () => {
       date: new Date('2026-08-02'),
       customerId: base.customerId,
       warehouseId: base.warehouseA,
-      handlerName: 'admin',
+      handlerName: '刚',
       items: [{ inventoryId: rows[0].id, weight: 10, price: 12 }],
     })
     await expect(updatePurchaseFreight(db, order.id, 100)).rejects.toThrow(
@@ -249,7 +275,7 @@ describe('卖出出库', () => {
       date: new Date('2026-08-01'),
       supplierId: base.supplierId,
       warehouseId: base.warehouseA,
-      handlerName: 'admin',
+      handlerName: '刚',
       items: [{ variantId: base.variantId, batchNo: 'DUP-1', weight: 100, price: 20 }],
     })
     const rows = await getInventoryRows(db, { warehouseId: base.warehouseA })
@@ -258,7 +284,7 @@ describe('卖出出库', () => {
         date: new Date('2026-08-05'),
         customerId: base.customerId,
         warehouseId: base.warehouseA,
-        handlerName: 'admin',
+        handlerName: '刚',
         items: [
           { inventoryId: rows[0].id, weight: 60, price: 22 },
           { inventoryId: rows[0].id, weight: 60, price: 22 },

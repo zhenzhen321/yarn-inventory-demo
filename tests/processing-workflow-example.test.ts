@@ -33,7 +33,7 @@ describe('完整加工业务后台案例', () => {
       date: new Date('2026-09-01'),
       supplierId: base.supplierId,
       warehouseId: base.warehouseA,
-      handlerName: 'admin',
+      handlerName: '刚',
       freight: 500,
       items: [
         {
@@ -52,7 +52,7 @@ describe('完整加工业务后台案例', () => {
       date: new Date('2026-09-02'),
       fromWarehouseId: base.warehouseA,
       toWarehouseId: factory.id,
-      handlerName: 'admin',
+      handlerName: '刚',
       freight: 300,
       items: [{ inventoryId: warehouseRaw.id, weight: 600, packages: 24 }],
     })
@@ -75,7 +75,7 @@ describe('完整加工业务后台案例', () => {
         date: new Date('2026-09-02'),
         customerId: base.customerId,
         warehouseId: factory.id,
-        handlerName: 'admin',
+        handlerName: '刚',
         items: [{ inventoryId: factoryRaw.id, weight: 600, packages: 24, price: 35 }],
       }),
     ).rejects.toThrow('未结算加工费')
@@ -92,7 +92,7 @@ describe('完整加工业务后台案例', () => {
       color: '藏青',
       unit: 'kg',
       batchNo: 'DYED-EXAMPLE-001',
-      handlerName: 'clerk',
+      handlerName: '萍',
       note: '完整后台测试案例',
     })
 
@@ -123,7 +123,7 @@ describe('完整加工业务后台案例', () => {
       date: new Date('2026-09-04'),
       factoryId: factory.id,
       warehouseId: base.warehouseA,
-      handlerName: 'admin',
+      handlerName: '刚',
       freight: 150,
       items: [
         {
@@ -159,7 +159,7 @@ describe('完整加工业务后台案例', () => {
       date: new Date('2026-09-05'),
       customerId: base.customerId,
       warehouseId: factory.id,
-      handlerName: 'clerk',
+      handlerName: '萍',
       items: [{ inventoryId: factoryFinished.id, weight: 170, price: 35 }],
     })
     expect(directSale.totalAmount.toString()).toBe('5950')
@@ -174,7 +174,7 @@ describe('完整加工业务后台案例', () => {
       amount: 1000,
       date: new Date('2026-09-20'),
       method: '银行转账',
-      handlerName: 'admin',
+      handlerName: '刚',
     })
     feeSummary = (await getFactoryFeeSummary(db)).find((row) => row.id === factory.id)!
     expect(feeSummary.paidAmount.toString()).toBe('1000')

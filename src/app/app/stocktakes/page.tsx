@@ -1,6 +1,7 @@
 import Link from 'next/link'
 import { prisma } from '@/lib/prisma'
 import { Table } from '@/components/ui/Table'
+import { formatBusinessDate } from '@/lib/business-date'
 
 export default async function StocktakesPage() {
   const rows = await prisma.stocktake.findMany({
@@ -25,7 +26,7 @@ export default async function StocktakesPage() {
           return (
             <tr key={o.id}>
               <td>{o.orderNo}</td>
-              <td>{o.date.toISOString().slice(0, 10)}</td>
+              <td>{formatBusinessDate(o.date)}</td>
               <td>{o.warehouse.name}</td>
               <td>{o.handlerName}</td>
               <td>{o.items.length}</td>

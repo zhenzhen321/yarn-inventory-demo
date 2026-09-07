@@ -31,6 +31,7 @@ export function getTestDb(): PrismaClient {
 }
 
 export async function resetDb(client: PrismaClient): Promise<void> {
+  await client.idempotencyRequest.deleteMany()
   await client.saleAllocation.deleteMany()
   await client.stockMovement.deleteMany()
   await client.processingOutput.deleteMany()

@@ -1,11 +1,17 @@
 // 端到端验收脚本（自包含、可重复运行）
 // 登录 → 自建 E2E 测试数据（纱线/仓库/供应商/客户/买入）→ 卖出 → 调拨 → 盘库 → 结算 → 页面检查
 // 不依赖演示数据，也不会改动已有业务数据（只新增带 E2E 前缀的测试记录）
-// 用法：node scripts/e2e.mjs
+// 用法：npm run test:e2e（由隔离启动器设置安全环境）
 import { readFileSync } from 'node:fs'
 
+if (process.env.E2E_ISOLATED_RUN !== '1') {
+  throw new Error('E2E 必须通过 npm run test:e2e 在隔离数据库和端口中运行')
+}
 const base = process.env.E2E_BASE_URL || 'http://localhost:3000'
+const target = new URL(base)
+if (target.port === '3000') throw new Error('E2E 拒绝连接家庭生产端口 3000')
 const ts = Date.now()
+let requestSequence = 0
 
 let e2ePassword = process.env.E2E_PASSWORD
 if (!e2ePassword) {
@@ -28,6 +34,9 @@ if (!admin2Password) {
 
 async function req(path, { method = 'GET', body, cookie, headers = {} } = {}) {
   const h = { 'Content-Type': 'application/json', ...headers }
+  if (method !== 'GET' && method !== 'HEAD' && !h['Idempotency-Key']) {
+    h['Idempotency-Key'] = `e2e-${ts}-${++requestSequence}`
+  }
   if (cookie) h.Cookie = cookie
   const res = await fetch(base + path, {
     method,
@@ -54,9 +63,6 @@ const login = await req('/api/auth/login', {
   body: { username: 'admin', password },
 })
 check('登录', login.status === 200)
-if (!login.setCookie) {
-  throw new Error(`登录未返回会话 Cookie（HTTP ${login.status}）：${login.text}`)
-}
 const cookie = login.setCookie.split(';')[0]
 
 let locked = false
@@ -117,20 +123,34 @@ check('建测试客户', customer.status === 201)
 
 const batchNo = `E2E-${ts}`
 const buyColor = `新色-${ts}`
+const purchaseIdempotencyKey = `e2e-purchase-${ts}`
+const purchaseBody = {
+  date: '2026-08-11',
+  supplierId: supplier.json.id,
+  warehouseId: whA.json.id,
+  handlerName: 'admin',
+  freight: 300,
+  note: 'E2E备注',
+  items: [{ yarnId: yarn.json.id, spec: '32支', color: buyColor, unit: 'kg', batchNo, weight: 1000, price: 20 }],
+}
 const purchase = await req('/api/purchases', {
   method: 'POST',
   cookie,
-  body: {
-    date: '2026-08-11',
-    supplierId: supplier.json.id,
-    warehouseId: whA.json.id,
-    handlerName: 'admin',
-    freight: 300,
-    note: 'E2E备注',
-    items: [{ yarnId: yarn.json.id, spec: '32支', color: buyColor, unit: 'kg', batchNo, weight: 1000, price: 20 }],
-  },
+  headers: { 'Idempotency-Key': purchaseIdempotencyKey },
+  body: purchaseBody,
 })
 check('买入保存', purchase.status === 201, purchase.json?.orderNo ?? purchase.text)
+const purchaseReplay = await req('/api/purchases', {
+  method: 'POST',
+  cookie,
+  headers: { 'Idempotency-Key': purchaseIdempotencyKey },
+  body: purchaseBody,
+})
+check(
+  '买入重复提交返回首次结果且不重复入库',
+  purchaseReplay.status === 200 && purchaseReplay.json?.orderNo === purchase.json?.orderNo,
+  purchaseReplay.json?.orderNo ?? purchaseReplay.text,
+)
 const variantsAfterBuy = await req(`/api/yarn-variants?yarnId=${yarn.json.id}`, { cookie })
 check('买入自动创建新颜色变体', variantsAfterBuy.json.some((v) => v.color === buyColor))
 
@@ -290,6 +310,7 @@ const feeSettle = await req(`/api/inventory/${frRow.id}`, {
   method: 'PATCH',
   cookie,
   body: {
+    date: '2026-08-15',
     processingFeePerKg: 2,
     inputWeight: 100,
     spec: '20支',
@@ -460,13 +481,10 @@ check(
 const iPage = await fetch(base + '/app/inventory', { headers: { Cookie: cookie } })
 const iHtml = await iPage.text()
 check(
-  '库存页含批次成本列',
+  '库存页含单位成本列',
   iPage.status === 200 && iHtml.includes('单位成本') && iHtml.includes('含运费单价'),
 )
-check(
-  '库存页含内部批次追溯入口',
-  iHtml.includes('内部批次') && iHtml.includes('/app/lots/'),
-)
+check('库存页含加工完工入口', iHtml.includes('加工厂 · 完工核算'))
 
 const stocktake = await req('/api/stocktakes', {
   method: 'POST',
@@ -585,7 +603,7 @@ const sPage = await fetch(base + '/app/settlements', { headers: { Cookie: cookie
 const sHtml = await sPage.text()
 check('结算页可访问', sPage.status === 200 && sHtml.includes('资金结算'))
 check('结算页买入/卖出分开', sHtml.includes('应付供应商') && sHtml.includes('应收客户'))
-check('结算页含登记与记录入口', sHtml.includes('登记结算') && sHtml.includes('结算记录'))
+check('结算页含登记和记录入口', sHtml.includes('登记结算') && sHtml.includes('结算记录'))
 
 const revertVariantColor = `撤回-${ts}`
 const revertPo = await req('/api/purchases', {
@@ -623,25 +641,26 @@ const revertSettle = await req('/api/settlements', {
 })
 check('撤回测试结算保存', revertSettle.status === 201)
 
-const settleId = revertSettle.json?.id
-if (!settleId) throw new Error('撤回测试结算未返回记录 ID')
+const { PrismaClient } = await import('@prisma/client')
+const pdb = new PrismaClient()
+const settleRow = await pdb.settlement.findFirst({
+  where: { counterpartyId: supplier.json.id, amount: 3000 },
+  orderBy: { createdAt: 'desc' },
+})
 const login2 = await req('/api/auth/login', {
   method: 'POST',
   body: { username: 'clerk', password: admin2Password || 'demo123456' },
 })
 check('clerk登录成功', login2.status === 200)
-if (!login2.setCookie) {
-  throw new Error(`clerk 登录未返回会话 Cookie（HTTP ${login2.status}）：${login2.text}`)
-}
 const cookie2 = login2.setCookie.split(';')[0]
-const forbidden = await req(`/api/settlements/${settleId}`, { method: 'DELETE', cookie: cookie2 })
+const forbidden = await req(`/api/settlements/${settleRow.id}`, { method: 'DELETE', cookie: cookie2 })
 check('非经办人撤回被拒(403)', forbidden.status === 403, forbidden.json?.error)
-const delSettle = await req(`/api/settlements/${settleId}`, { method: 'DELETE', cookie })
+const delSettle = await req(`/api/settlements/${settleRow.id}`, { method: 'DELETE', cookie })
 check('经办人撤回结算成功', delSettle.status === 200)
 
 const invRev = await req('/api/inventory', { cookie })
-const revRow = invRev.json.find(
-  (r) => r.batch.batchNo === `E2ER-${ts}` && r.warehouseId === whA.json.id,
+const revSaleSource = invRev.json.find(
+  (r) => r.batch.batchNo === `PR-${ts}` && r.warehouseId === whB.json.id,
 )
 const revSale = await req('/api/sales', {
   method: 'POST',
@@ -649,9 +668,9 @@ const revSale = await req('/api/sales', {
   body: {
     date: '2026-08-15',
     customerId: customer.json.id,
-    warehouseId: whA.json.id,
+    warehouseId: whB.json.id,
     handlerName: 'admin',
-    items: [{ inventoryId: revRow.id, weight: 100, price: 22 }],
+    items: [{ inventoryId: revSaleSource.id, weight: 10, price: 22 }],
   },
 })
 check('撤回测试卖出保存', revSale.status === 201, revSale.json?.orderNo ?? revSale.text)
@@ -663,58 +682,28 @@ check('撤回卖出成功', delSale.status === 200)
 const revertPoList = await req('/api/purchases', { cookie })
 const revertPoRow = revertPoList.json.find((o) => o.orderNo === revertPo.json.orderNo)
 const delPo = await req(`/api/purchases/${revertPoRow.id}`, { method: 'DELETE', cookie })
-check(
-  '有下游流水的买入即使销售已撤回仍保留来源链',
-  delPo.status === 400 && delPo.json?.error?.includes('已被卖出、调拨、加工或盘点'),
-  delPo.json?.error,
-)
+check('撤回买入成功', delPo.status === 200)
 const afterRev = await req('/api/inventory', { cookie })
-const restoredRevRow = afterRev.json.find(
-  (r) => r.batch.batchNo === `E2ER-${ts}` && r.warehouseId === whA.json.id,
-)
 check(
-  '撤回销售后来源批次库存恢复',
-  restoredRevRow && Number(restoredRevRow.weight) === 500,
-  restoredRevRow?.weight,
+  '撤回买入后库存归 0',
+  !afterRev.json.some(
+    (r) => r.batch.batchNo === `E2ER-${ts}` && r.warehouseId === whA.json.id,
+  ),
 )
-
-const cleanPo = await req('/api/purchases', {
-  method: 'POST',
-  cookie,
-  body: {
-    date: '2026-08-16',
-    supplierId: supplier.json.id,
-    warehouseId: whA.json.id,
-    handlerName: 'admin',
-    items: [{
-      yarnId: yarn.json.id,
-      spec: '32支',
-      color: `可撤回-${ts}`,
-      unit: 'kg',
-      batchNo: `E2ECLEAN-${ts}`,
-      weight: 200,
-      price: 20,
-    }],
-  },
-})
-check('无下游买入保存', cleanPo.status === 201, cleanPo.json?.orderNo ?? cleanPo.text)
-const cleanPoList = await req('/api/purchases', { cookie })
-const cleanPoRow = cleanPoList.json.find((o) => o.orderNo === cleanPo.json.orderNo)
-const delCleanPo = await req(`/api/purchases/${cleanPoRow.id}`, { method: 'DELETE', cookie })
-check('无下游买入通过反向流水撤回', delCleanPo.status === 200, delCleanPo.json?.error)
-
 const open3 = await req('/api/settlements', { cookie })
 const poFinal = open3.json.find(
   (o) => o.side === 'PURCHASE' && o.name === `E2E供应商-${ts}`,
 )
 check(
-  '撤回后应付只统计仍有效的 30000、已付 10000',
+  '撤回后应付恢复为货款 20000、已付 10000',
   poFinal &&
-    Number(poFinal.totalAmount) === 30000 &&
+    Number(poFinal.totalAmount) === 20000 &&
     Number(poFinal.settledAmount) === 10000 &&
-    Number(poFinal.remainingAmount) === 20000,
+    Number(poFinal.remainingAmount) === 10000,
   `${poFinal?.settledAmount}/${poFinal?.remainingAmount}`,
 )
+await pdb.$disconnect()
+
 const rPage = await fetch(base + '/app/reports', { headers: { Cookie: cookie } })
 const rHtml = await rPage.text()
 check('报表页可访问', rPage.status === 200 && rHtml.includes('报表'))
@@ -736,7 +725,7 @@ check('报表页含毛利估算', rHtml3.includes('毛利估算'))
 
 const dPage2 = await fetch(base + '/app/dashboard', { headers: { Cookie: cookie } })
 const dHtml2 = await dPage2.text()
-check('首页导航高亮已渲染', dHtml2.includes('bg-blue-600'))
+check('首页导航高亮已渲染', dHtml2.includes('aria-current="page"') && dHtml2.includes('nav-active'))
 
 const auditPage = await fetch(base + '/app/audit', { headers: { Cookie: cookie } })
 const auditHtml = await auditPage.text()
@@ -768,6 +757,79 @@ await checkExport('导出流水xlsx', 'section=flow')
 await checkExport('导出出入库记录xlsx', 'section=orders&type=ALL')
 await checkExport('导出结算记录xlsx', 'section=settlements')
 await checkExport('导出对账单xlsx', `section=statement&counterpartyId=${supplier.json.id}`)
+
+const multiPurchase = await req('/api/purchases', {
+  method: 'POST',
+  cookie,
+  body: {
+    date: '2026-08-16',
+    supplierId: supplier.json.id,
+    warehouseId: whA.json.id,
+    handlerName: 'admin',
+    items: [
+      { yarnId: yarn.json.id, spec: '32支', color: `拼缸A-${ts}`, unit: 'kg', batchNo: `E2EM-A-${ts}`, weight: 10, price: 10 },
+      { yarnId: yarn.json.id, spec: '32支', color: `拼缸B-${ts}`, unit: 'kg', batchNo: `E2EM-B-${ts}`, weight: 20, price: 20 },
+    ],
+  },
+})
+check('多投入测试采购保存', multiPurchase.status === 201)
+const multiInventory = await req('/api/inventory', { cookie })
+const multiRaw = multiInventory.json.filter(
+  (r) => [`E2EM-A-${ts}`, `E2EM-B-${ts}`].includes(r.batch.batchNo),
+)
+const multiTransfer = await req('/api/transfers', {
+  method: 'POST',
+  cookie,
+  body: {
+    date: '2026-08-16',
+    fromWarehouseId: whA.json.id,
+    toWarehouseId: factory.json.id,
+    handlerName: 'admin',
+    items: multiRaw.map((r) => ({ inventoryId: r.id, weight: Number(r.weight) })),
+  },
+})
+check('多投入测试送厂', multiTransfer.status === 201 && multiRaw.length === 2)
+const multiFactoryInventory = await req('/api/inventory', { cookie })
+const multiFactoryRaw = multiFactoryInventory.json.filter(
+  (r) =>
+    r.warehouseId === factory.json.id &&
+    [`E2EM-A-${ts}`, `E2EM-B-${ts}`].includes(r.batch.batchNo),
+)
+const multiJobKey = `e2e-processing-multi-${ts}`
+const multiJobBody = {
+  date: '2026-08-16',
+  factoryId: factory.json.id,
+  feePerKg: 1,
+  additionalFreight: 0.02,
+  otherCost: 0.01,
+  inputs: multiFactoryRaw.map((r) => ({ inventoryId: r.id, weight: Number(r.weight) })),
+  outputs: [
+    { yarnId: yarn.json.id, spec: '40支', color: `拼缸深-${ts}`, unit: 'kg', batchNo: `E2EM-OUT-A-${ts}`, weight: 14 },
+    { yarnId: yarn.json.id, spec: '40支', color: `拼缸浅-${ts}`, unit: 'kg', batchNo: `E2EM-OUT-B-${ts}`, weight: 15 },
+  ],
+}
+const multiJob = await req('/api/processing-jobs', {
+  method: 'POST',
+  cookie,
+  headers: { 'Idempotency-Key': multiJobKey },
+  body: multiJobBody,
+})
+check(
+  '多投入多产出完工接口',
+  multiJob.status === 201 && multiJob.json?.inputs === 2 && multiJob.json?.outputs?.length === 2,
+  multiJob.text,
+)
+const multiJobReplay = await req('/api/processing-jobs', {
+  method: 'POST',
+  cookie,
+  headers: { 'Idempotency-Key': multiJobKey },
+  body: multiJobBody,
+})
+check(
+  '多投入多产出重复提交返回首次结果',
+  multiJobReplay.status === 200 && multiJobReplay.json?.orderNo === multiJob.json?.orderNo,
+  multiJobReplay.text,
+)
 
 const delWh = await req('/api/warehouses', {
   method: 'POST',

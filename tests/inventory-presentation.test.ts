@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import {
   buildInventoryGroups,
+  findScannedInventory,
   getSaleInventoryChoices,
 } from '@/lib/inventory-presentation'
 
@@ -97,5 +98,14 @@ describe('销售库存逐级选择', () => {
 
     expect(warehouseRows.rowsFor('', '')).toEqual([])
     expect(warehouseRows.rowsFor('棉纱', '')).toEqual([])
+  })
+
+  it('同一内部批次分布多仓时优先命中当前仓库余额', () => {
+    const splitRows = [
+      { ...sampleRows[0], id: 'inv-other', warehouseId: 'warehouse-other', scanCode: 'SCAN-1' },
+      { ...sampleRows[0], id: 'inv-current', warehouseId: 'warehouse-a', scanCode: 'SCAN-1' },
+    ]
+
+    expect(findScannedInventory(splitRows, 'warehouse-a', 'scan-1')?.id).toBe('inv-current')
   })
 })

@@ -2,11 +2,18 @@
 
 import { FormEvent, useMemo, useState } from 'react'
 import { useRouter } from 'next/navigation'
+import { ChoiceField } from '@/components/ui/ChoiceField'
+import { BusinessDateField } from '@/components/ui/BusinessDateField'
+import { Notice } from '@/components/ui/Notice'
+import { useUnsavedChanges } from '@/hooks/useUnsavedChanges'
+import { formatNumber } from '@/lib/display'
 import { Button } from '@/components/ui/Button'
 import { Input } from '@/components/ui/Input'
 import { ExpressionInput } from '@/components/ui/ExpressionInput'
 import { Select } from '@/components/ui/Select'
 import { resolveNumeric } from '@/lib/expression'
+import { businessDateToday } from '@/lib/business-date'
+import { useIdempotentSubmit } from '@/hooks/useIdempotentSubmit'
 
 interface Option {
   id: string
@@ -40,6 +47,8 @@ export function TransferForm({
   defaultHandler?: string
 }) {
   const router = useRouter()
+  const { markDirty, markSaved, confirmDiscard } = useUnsavedChanges()
+  const { submit, submitting } = useIdempotentSubmit()
   const [fromWarehouseId, setFromWarehouseId] = useState(warehouses[0]?.id ?? '')
   const [toWarehouseId, setToWarehouseId] = useState(
     destinations[1]?.id ?? destinations[0]?.id ?? '',
@@ -66,7 +75,7 @@ export function TransferForm({
     setMessage('')
     const form = new FormData(e.currentTarget)
     const body = {
-      date: String(form.get('date') ?? new Date().toISOString().slice(0, 10)),
+      date: String(form.get('date') ?? businessDateToday()),
       fromWarehouseId,
       toWarehouseId,
       handlerName: String(form.get('handlerName')),
@@ -78,13 +87,17 @@ export function TransferForm({
         packages: r.packages ? Number(r.packages) : null,
       })),
     }
-    const res = await fetch('/api/transfers', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(body),
-    })
+    const res = await submit((idempotencyKey) =>
+      fetch('/api/transfers', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'Idempotency-Key': idempotencyKey },
+        body: JSON.stringify(body),
+      }),
+    ).catch(() => { setMessage('网络中断，填写内容已保留，请再次点击保存重试。'); return null })
+    if (!res) return
     if (res.ok) {
       const data = await res.json()
+      markSaved()
       setSavedOrderNo(data.orderNo)
       setRows([{ inventoryId: '', weight: '', packages: '' }])
       router.refresh()
@@ -95,51 +108,16 @@ export function TransferForm({
   }
 
   return (
-    <form onSubmit={onSubmit} className="space-y-4">
-      <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
-        <label className="text-sm">
-          日期
-          <Input
-            type="date"
-            name="date"
-            required
-            defaultValue={new Date().toISOString().slice(0, 10)}
-          />
-        </label>
-        <label className="text-sm">
-          来源
-          <Select
-            value={fromWarehouseId}
-            onChange={(e) => {
-              setFromWarehouseId(e.target.value)
-              setRows([{ inventoryId: '', weight: '', packages: '' }])
-            }}
-            required
-          >
-            {warehouses.map((w) => (
-              <option key={w.id} value={w.id}>
-                {w.name}
-                {w.type === 'FACTORY' ? '（加工厂）' : ''}
-              </option>
-            ))}
-          </Select>
-        </label>
-        <label className="text-sm">
-          目标
-          <Select value={toWarehouseId} onChange={(e) => setToWarehouseId(e.target.value)} required>
-            {destinations.map((w) => (
-              <option key={w.id} value={w.id}>
-                {w.name}
-                {w.type === 'FACTORY' ? '（加工厂）' : ''}
-              </option>
-            ))}
-          </Select>
-        </label>
+    <form onSubmit={onSubmit} onChange={markDirty} className="space-y-5">
+      <div className="form-section grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
+<BusinessDateField onChange={markDirty} />
+<ChoiceField label="来源" options={warehouses} value={fromWarehouseId} onChange={(value) => { if(value === fromWarehouseId) return; if(rows.some((row) => row.inventoryId) && !confirmDiscard()) return; markDirty(); setFromWarehouseId(value); setRows([{ inventoryId: "", weight: "", packages: "" }]) }} memoryKey={"transfer:from:" + defaultHandler} />
+<ChoiceField label="目标" options={destinations.filter((row) => row.id !== fromWarehouseId)} value={toWarehouseId} onChange={(value) => { markDirty(); setToWarehouseId(value) }} memoryKey={"transfer:to:" + defaultHandler} />
         <label className="text-sm">
           经办人
-          <Select name="handlerName" defaultValue={defaultHandler ?? 'admin'} required>
-            <option value="admin">admin</option>
-            <option value="clerk">clerk</option>
+          <Select name="handlerName" defaultValue={defaultHandler ?? '刚'} required>
+            <option value="刚">刚</option>
+            <option value="萍">萍</option>
           </Select>
         </label>
       </div>
@@ -158,7 +136,7 @@ export function TransferForm({
       {rows.map((row, idx) => (
         <div
           key={idx}
-          className="grid gap-3 rounded border bg-white p-3 sm:grid-cols-2 lg:grid-cols-5"
+          className="form-section grid gap-3 sm:grid-cols-2"
         >
           <Select
             value={row.inventoryId}
@@ -212,8 +190,9 @@ export function TransferForm({
           />
           <Button
             type="button"
-            onClick={() => setRows((prev) => prev.filter((_, i) => i !== idx))}
-            className="bg-red-600 hover:bg-red-700"
+            disabled={rows.length === 1}
+            onClick={() => { markDirty(); setRows((prev) => prev.filter((_, i) => i !== idx)) }}
+            variant="secondary"
           >
             删除
           </Button>
@@ -225,14 +204,14 @@ export function TransferForm({
       >
         加一行
       </Button>
-      <div className="mt-8 space-y-3 border-t pt-6">
+      <div className="form-footer"><p className="font-semibold">调拨合计 {formatNumber(rows.reduce((sum, row) => sum + (resolveNumeric(row.weight) ?? 0), 0))} kg</p><p className="text-sm">{warehouses.find((row) => row.id === fromWarehouseId)?.name} → {destinations.find((row) => row.id === toWarehouseId)?.name}</p>
         {savedOrderNo && (
           <p className="text-sm text-green-600">保存成功，单号：{savedOrderNo}</p>
         )}
-        {message && <p className="text-sm text-red-600">{message}</p>}
+        <Notice>{message}</Notice>
         <div className="flex justify-end">
-          <Button type="submit" className="w-full sm:w-auto sm:min-w-40">
-            保存调拨单
+          <Button type="submit" disabled={submitting || fromWarehouseId === toWarehouseId} className="w-full sm:w-auto sm:min-w-40">
+            {submitting ? '保存中…' : '保存调拨单'}
           </Button>
         </div>
       </div>

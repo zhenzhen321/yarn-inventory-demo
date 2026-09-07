@@ -2,11 +2,15 @@
 
 import { FormEvent, useState } from 'react'
 import { useRouter } from 'next/navigation'
+import { Notice } from '@/components/ui/Notice'
+import { useUnsavedChanges } from '@/hooks/useUnsavedChanges'
 import { Button } from '@/components/ui/Button'
 import { Input } from '@/components/ui/Input'
 import { ExpressionInput } from '@/components/ui/ExpressionInput'
 import { Select } from '@/components/ui/Select'
 import { resolveNumeric } from '@/lib/expression'
+import { businessDateToday } from '@/lib/business-date'
+import { useIdempotentSubmit } from '@/hooks/useIdempotentSubmit'
 
 interface WarehouseOption {
   id: string
@@ -49,6 +53,8 @@ export function ProcessingReturnForm({
   defaultHandler?: string
 }) {
   const router = useRouter()
+  const { markDirty, markSaved } = useUnsavedChanges()
+  const { submit, submitting } = useIdempotentSubmit()
   const [factoryId, setFactoryId] = useState(factories[0]?.id ?? '')
   const [rows, setRows] = useState<Row[]>([emptyRow()])
   const [expectedSellPrice, setExpectedSellPrice] = useState('')
@@ -79,7 +85,7 @@ export function ProcessingReturnForm({
     setMessage('')
     const form = new FormData(event.currentTarget)
     const body = {
-      date: String(form.get('date') ?? new Date().toISOString().slice(0, 10)),
+      date: String(form.get('date') ?? businessDateToday()),
       factoryId,
       warehouseId: String(form.get('warehouseId')),
       handlerName: String(form.get('handlerName')),
@@ -102,13 +108,17 @@ export function ProcessingReturnForm({
         }
       }),
     }
-    const res = await fetch('/api/processing-returns', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(body),
-    })
+    const res = await submit((idempotencyKey) =>
+      fetch('/api/processing-returns', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'Idempotency-Key': idempotencyKey },
+        body: JSON.stringify(body),
+      }),
+    ).catch(() => { setMessage('网络中断，填写内容已保留，请再次点击保存重试。'); return null })
+    if (!res) return
     if (res.ok) {
       const data = await res.json()
+      markSaved()
       setSavedOrderNo(data.orderNo)
       setRows([emptyRow()])
       setExpectedSellPrice('')
@@ -120,7 +130,7 @@ export function ProcessingReturnForm({
   }
 
   return (
-    <form onSubmit={onSubmit} className="space-y-4">
+    <form onSubmit={onSubmit} onChange={markDirty} className="space-y-4">
       <div className="rounded-lg border border-blue-200 bg-blue-50 p-3 text-sm text-blue-950">
         这里仅把已经完工核算的成品批次从加工厂移回仓库，不再重新称重或重复计加工费。
         如果加工完直接卖出，请到“卖出出库”选择加工厂并扫描成品标签。
@@ -128,7 +138,7 @@ export function ProcessingReturnForm({
       <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
         <label className="text-sm">
           日期
-          <Input type="date" name="date" required defaultValue={new Date().toISOString().slice(0, 10)} />
+          <Input type="date" name="date" required defaultValue={businessDateToday()} />
         </label>
         <label className="text-sm">
           来源加工厂
@@ -151,9 +161,9 @@ export function ProcessingReturnForm({
         </label>
         <label className="text-sm">
           经办人
-          <Select name="handlerName" defaultValue={defaultHandler ?? 'admin'} required>
-            <option value="admin">admin</option>
-            <option value="clerk">clerk</option>
+          <Select name="handlerName" defaultValue={defaultHandler ?? '刚'} required>
+            <option value="刚">刚</option>
+            <option value="萍">萍</option>
           </Select>
         </label>
         <label className="text-sm">
@@ -196,8 +206,10 @@ export function ProcessingReturnForm({
       })}
       <Button type="button" onClick={() => setRows((current) => [...current, emptyRow()])}>加一行</Button>
       {savedOrderNo && <p className="text-sm text-green-600">保存成功，单号：{savedOrderNo}</p>}
-      {message && <p className="text-sm text-red-600">{message}</p>}
-      <Button type="submit">保存成品返仓单</Button>
+      <Notice>{message}</Notice>
+      <Button type="submit" disabled={submitting}>
+        {submitting ? '保存中…' : '保存成品返仓单'}
+      </Button>
     </form>
   )
 }

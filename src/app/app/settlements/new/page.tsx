@@ -38,7 +38,7 @@ export default async function NewSettlementPage({
         description="选择结算方向和往来单位，系统会显示当前未结金额及该对象的往来明细。"
       />
       <SettleForm
-        defaultHandler={user?.name ?? 'admin'}
+        defaultHandler={user?.name ?? '刚'}
         suppliers={suppliers}
         customers={customers}
         factories={factories}

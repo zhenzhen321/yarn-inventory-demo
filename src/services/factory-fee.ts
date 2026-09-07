@@ -1,5 +1,7 @@
 import { Prisma, PrismaClient } from '@prisma/client'
 import { settlementStatus, type SettlementStatus } from './settlement'
+import { businessDateFromInput, businessDateToday } from '@/lib/business-date'
+import { runIdempotent } from './idempotency'
 
 export interface FactoryFeeSummary {
   id: string
@@ -53,8 +55,10 @@ export interface FactoryFeePaymentInput {
   handlerName: string
 }
 
-export async function createFactoryFeePayment(db: PrismaClient, input: FactoryFeePaymentInput) {
-  return db.$transaction(async (tx) => {
+async function createFactoryFeePaymentInTransaction(
+  tx: Prisma.TransactionClient,
+  input: FactoryFeePaymentInput,
+) {
     const factory = await tx.warehouse.findUnique({ where: { id: input.factoryId } })
     if (!factory || factory.type !== 'FACTORY') throw new Error('加工厂不存在')
     const amount = new Prisma.Decimal(input.amount).toDecimalPlaces(2)
@@ -87,7 +91,29 @@ export async function createFactoryFeePayment(db: PrismaClient, input: FactoryFe
       },
       include: { factory: true },
     })
-  })
+}
+
+export function createFactoryFeePayment(db: PrismaClient, input: FactoryFeePaymentInput) {
+  return db.$transaction((tx) => createFactoryFeePaymentInTransaction(tx, input))
+}
+
+export function createFactoryFeePaymentIdempotent(
+  db: PrismaClient,
+  input: FactoryFeePaymentInput,
+  idempotencyKey?: string,
+) {
+  return runIdempotent(
+    db,
+    'PROCESSING_FEE_PAYMENT_CREATE',
+    idempotencyKey,
+    input,
+    (tx) => createFactoryFeePaymentInTransaction(tx, input),
+    (tx, resourceId) =>
+      tx.processingFeePayment.findUniqueOrThrow({
+        where: { id: resourceId },
+        include: { factory: true },
+      }),
+  )
 }
 
 export async function revertFactoryFeePayment(db: PrismaClient, id: string) {
@@ -191,7 +217,9 @@ export async function getFactoryStatement(
   let seq = 0
   for (const s of settlements) {
     events.push({
-      date: s.createdAt,
+      date:
+        s.processingJob?.date ??
+        businessDateFromInput(businessDateToday(s.createdAt)),
       seq: seq++,
       type: '加工费',
       amount: s.feeTotal,

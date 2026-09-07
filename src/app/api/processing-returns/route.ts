@@ -1,9 +1,10 @@
 import { NextResponse } from 'next/server'
 import { prisma } from '@/lib/prisma'
 import { processingReturnSchema } from '@/lib/validation'
-import { createProcessingReturn } from '@/services/inventory'
+import { createProcessingReturnIdempotent } from '@/services/inventory'
 import { getSessionUser } from '@/lib/auth'
 import { logAudit } from '@/lib/audit'
+import { idempotencyKeyFromRequest } from '@/services/idempotency'
 
 export async function POST(req: Request) {
   const user = await getSessionUser()
@@ -17,14 +18,25 @@ export async function POST(req: Request) {
     )
   }
   try {
-    const order = await createProcessingReturn(prisma, parsed.data)
-    await logAudit({
+    const result = await createProcessingReturnIdempotent(
+      prisma,
+      parsed.data,
+      idempotencyKeyFromRequest(req),
+    )
+    const order = result.value
+    if (!result.replayed) await logAudit({
       userName: user?.name ?? '未知',
       action: 'PROCESSING_RETURN_CREATE',
       target: '加工收回',
       detail: `单号 ${order.orderNo}，加工费单价 ${order.processingFeePerKg}，运费 ${order.freight}，条目 ${order.items.length}`,
     })
-    return NextResponse.json({ orderNo: order.orderNo }, { status: 201 })
+    return NextResponse.json(
+      { orderNo: order.orderNo },
+      {
+        status: result.replayed ? 200 : 201,
+        headers: { 'Idempotent-Replayed': String(result.replayed) },
+      },
+    )
   } catch (e) {
     const message = e instanceof Error ? e.message : '保存失败'
     return NextResponse.json({ error: message }, { status: 400 })

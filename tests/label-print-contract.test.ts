@@ -6,6 +6,7 @@ const componentSource = readFileSync(
   path.resolve(process.cwd(), 'src', 'components', 'labels', 'LabelPrintButton.tsx'),
   'utf8',
 )
+const layoutSource = readFileSync(path.resolve(process.cwd(), 'src/lib/label-layout.ts'), 'utf8')
 const purchaseSource = readFileSync(
   path.resolve(process.cwd(), 'src', 'components', 'purchases', 'PurchaseForm.tsx'),
   'utf8',
@@ -36,7 +37,7 @@ describe('独立批次二维码标签', () => {
       'item.packages',
       'item.lotNo',
     ]) {
-      expect(componentSource).toContain(field)
+      expect(componentSource + layoutSource).toContain(field)
     }
     expect(componentSource).toContain('件')
     expect(purchaseApiSource).toContain('batchNo: item.batch.batchNo')
@@ -50,13 +51,21 @@ describe('独立批次二维码标签', () => {
     expect(componentSource).not.toContain('api.qrserver.com')
   })
 
+  it('首次打开时把二维码生成过程显示为加载中，不误报历史无二维码', () => {
+    expect(componentSource).toContain('const [previewReady, setPreviewReady] = useState(false)')
+    expect(componentSource).toContain('setPreviewReady(false)')
+    expect(componentSource).toContain('setPreviewReady(true)')
+    expect(componentSource).toContain('正在生成二维码并排版…')
+    expect(componentSource).toContain('previewReady ? (')
+  })
+
   it('支持常用毫米尺寸、自定义设置和本机记忆', () => {
     for (const size of ['40 × 30 mm', '50 × 30 mm', '60 × 40 mm']) {
       expect(componentSource).toContain(size)
     }
     expect(componentSource).toContain('自定义尺寸')
     expect(componentSource).toContain('localStorage')
-    expect(componentSource).toContain('@page')
+    expect(layoutSource).toContain('@page')
     expect(componentSource).toContain('settings.width')
     expect(componentSource).toContain('settings.height')
     expect(componentSource).toContain('layoutVersion: SETTINGS_VERSION')
@@ -78,7 +87,7 @@ describe('独立批次二维码标签', () => {
   it('扫码枪销售按内部扫码码匹配，并默认整批重量和件数', () => {
     expect(saleSource).toContain('扫码枪快速出库')
     expect(saleSource).toContain("event.key === 'Enter'")
-    expect(saleSource).toContain('row.scanCode?.toUpperCase()')
+    expect(saleSource).toContain('findScannedInventory(inventoryRows, warehouseId, code)')
     expect(saleSource).toContain('weight: matched.weight')
     expect(saleSource).toContain("packages: matched.packages?.toString() ?? ''")
   })

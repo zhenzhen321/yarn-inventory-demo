@@ -97,6 +97,41 @@ describe('毛利估算（含运费）', () => {
     expect(profit.estimatedFreight.toString()).toBe('30')
     expect(profit.estimatedProfit.toString()).toBe('120')
   })
+
+  it('按销售流水的实际结转总额统计，避免单位成本二次舍入', async () => {
+    const base = await createBase(db)
+    const factory = await db.warehouse.create({ data: { name: '染厂精度', type: 'FACTORY' } })
+    await createPurchase(db, {
+      date: new Date('2026-09-06'),
+      supplierId: base.supplierId,
+      warehouseId: factory.id,
+      handlerName: '刚',
+      items: [{ variantId: base.variantId, batchNo: 'PROFIT-EXACT', weight: 1000, price: 20 }],
+    })
+    const raw = (await getInventoryRows(db, { warehouseId: factory.id }))[0]
+    const finished = await settleProcessingFee(db, raw.id, {
+      feePerKg: 4,
+      inputWeight: 1000,
+      outputWeight: 970,
+      handlerName: '刚',
+    })
+    const sale = await createSale(db, {
+      date: new Date('2026-09-06'),
+      customerId: base.customerId,
+      warehouseId: factory.id,
+      handlerName: '刚',
+      items: [{ inventoryId: finished.outputInventory.id, weight: 970, price: 30 }],
+    })
+    const movement = await db.stockMovement.findFirstOrThrow({
+      where: { type: 'SALE', referenceId: sale.id },
+    })
+
+    const profit = await getProfitEstimate(db)
+    expect(profit.estimatedCost.toString()).toBe(movement.goodsCost.toString())
+    expect(profit.estimatedProfit.toString()).toBe(
+      sale.totalAmount.minus(movement.goodsCost).minus(movement.freightCost).toString(),
+    )
+  })
 })
 
 describe('加工收回后的库存金额', () => {

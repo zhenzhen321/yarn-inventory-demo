@@ -1,9 +1,13 @@
 import { NextResponse } from 'next/server'
 import { prisma } from '@/lib/prisma'
 import { processingFeePaymentSchema } from '@/lib/validation'
-import { createFactoryFeePayment, getFactoryFeePayments } from '@/services/factory-fee'
+import {
+  createFactoryFeePaymentIdempotent,
+  getFactoryFeePayments,
+} from '@/services/factory-fee'
 import { getSessionUser } from '@/lib/auth'
 import { logAudit } from '@/lib/audit'
+import { idempotencyKeyFromRequest } from '@/services/idempotency'
 
 export async function POST(req: Request) {
   const user = await getSessionUser()
@@ -17,14 +21,25 @@ export async function POST(req: Request) {
     )
   }
   try {
-    const row = await createFactoryFeePayment(prisma, parsed.data)
-    await logAudit({
+    const result = await createFactoryFeePaymentIdempotent(
+      prisma,
+      parsed.data,
+      idempotencyKeyFromRequest(req),
+    )
+    const row = result.value
+    if (!result.replayed) await logAudit({
       userName: user?.name ?? '未知',
       action: 'PROCESSING_FEE_PAYMENT',
       target: '加工费付款',
       detail: `加工厂 ${row.factory.name}，金额 ${row.amount}，方式 ${row.method ?? '未指定'}`,
     })
-    return NextResponse.json({ id: row.id }, { status: 201 })
+    return NextResponse.json(
+      { id: row.id },
+      {
+        status: result.replayed ? 200 : 201,
+        headers: { 'Idempotent-Replayed': String(result.replayed) },
+      },
+    )
   } catch (e) {
     const message = e instanceof Error ? e.message : '保存失败'
     return NextResponse.json({ error: message }, { status: 400 })

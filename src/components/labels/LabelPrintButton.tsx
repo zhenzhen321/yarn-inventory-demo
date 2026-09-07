@@ -7,28 +7,8 @@ import { Button } from '@/components/ui/Button'
 import { Input } from '@/components/ui/Input'
 import { Select } from '@/components/ui/Select'
 
-export interface LabelPrintOrder {
-  orderNo: string
-  items: {
-    yarnName: string
-    spec: string
-    color: string
-    weight: string
-    unit: string
-    packages: number | null
-    batchNo?: string | null
-    lotNo?: string | null
-    scanCode?: string | null
-  }[]
-}
-
-interface LabelSettings {
-  width: number
-  height: number
-  padding: number
-  topOffset: number
-  fontSize: number
-}
+import { buildLabelDocument, fitLabelDocument, type LabelSettings, type LabelPrintOrder } from '@/lib/label-layout'
+export type { LabelPrintOrder } from '@/lib/label-layout'
 
 const STORAGE_KEY = 'yarn-ms-label-print-settings'
 const SETTINGS_VERSION = 3
@@ -49,16 +29,6 @@ function safeNumber(value: number, fallback: number, min: number, max: number) {
   return Number.isFinite(value) ? Math.min(max, Math.max(min, value)) : fallback
 }
 
-function escapeHtml(value: string) {
-  return value.replace(
-    /[&<>"']/g,
-    (character) =>
-      ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#039;' })[
-        character
-      ]!,
-  )
-}
-
 function defaultCopies(order: LabelPrintOrder) {
   return order.items.map(() => 1)
 }
@@ -67,7 +37,7 @@ async function qrDataUrl(scanCode?: string | null) {
   if (!scanCode) return ''
   return QRCode.toDataURL(scanCode, {
     errorCorrectionLevel: 'M',
-    margin: 0,
+    margin: 4,
     width: 256,
     color: { dark: '#000000', light: '#ffffff' },
   })
@@ -77,16 +47,28 @@ export function LabelPrintButton({
   order,
   label = '打印标签',
   className = '',
+  context,
 }: {
   order: LabelPrintOrder
   label?: string
   className?: string
+  context?: string
 }) {
   const [mounted, setMounted] = useState(false)
   const [open, setOpen] = useState(false)
   const [settings, setSettings] = useState<LabelSettings>(DEFAULT_SETTINGS)
   const [copies, setCopies] = useState<number[]>(() => defaultCopies(order))
   const [previewCodes, setPreviewCodes] = useState<string[]>([])
+  const [previewReady, setPreviewReady] = useState(false)
+  const [previewMessages, setPreviewMessages] = useState<Record<string, string>>({})
+  const previewDocuments = useMemo(
+    () => previewReady
+      ? order.items.map((item, index) =>
+          buildLabelDocument(order.orderNo, [{ item, qr: previewCodes[index] ?? '' }], settings),
+        )
+      : [],
+    [order, previewCodes, previewReady, settings],
+  )
   const [message, setMessage] = useState('')
   const [printing, setPrinting] = useState(false)
 
@@ -121,8 +103,15 @@ export function LabelPrintButton({
   useEffect(() => {
     if (!open) return
     let active = true
+    setPreviewReady(false)
+    setPreviewCodes([])
     Promise.all(order.items.map((item) => qrDataUrl(item.scanCode))).then((codes) => {
-      if (active) setPreviewCodes(codes)
+      if (active) {
+        setPreviewCodes(codes)
+        setPreviewReady(true)
+      }
+    }).catch(() => {
+      if (active) setMessage('二维码生成失败，请刷新后重试')
     })
     return () => {
       active = false
@@ -157,82 +146,32 @@ export function LabelPrintButton({
       setMessage('请至少打印一张标签')
       return
     }
+    const printWindow = window.open('', '_blank', 'width=760,height=640')
+    if (!printWindow) {
+      setMessage('浏览器阻止了打印窗口，请允许弹出窗口后重试')
+      return
+    }
     setPrinting(true)
     try {
       const labels = order.items.flatMap((item, index) =>
         Array.from({ length: copies[index] ?? 0 }, () => item),
       )
-      const printable = await Promise.all(
-        labels.map(async (item) => ({ item, qr: await qrDataUrl(item.scanCode) })),
-      )
-      const printWindow = window.open('', '_blank', 'width=760,height=640')
-      if (!printWindow) {
-        setMessage('浏览器阻止了打印窗口，请允许弹出窗口后重试')
+      const printable = await Promise.all(labels.map(async (item) => ({ item, qr: await qrDataUrl(item.scanCode) })))
+      if (printWindow.closed) return
+      printWindow.document.write(buildLabelDocument(order.orderNo, printable, settings))
+      printWindow.document.close()
+      const results = await fitLabelDocument(printWindow.document)
+      const invalid = results.findIndex((result) => !result.ok)
+      if (invalid !== -1) {
+        setMessage(`第 ${invalid + 1} 张：${results[invalid].message}`)
+        printWindow.close()
         return
       }
-      const labelHtml = printable
-        .map(
-          ({ item, qr }) => `
-            <section class="label">
-              <div class="info">
-                <div class="order-no">${escapeHtml(order.orderNo)}</div>
-                <div class="yarn-name">${escapeHtml(item.yarnName)}</div>
-                <div class="detail">${escapeHtml(item.spec)} · ${escapeHtml(item.color)}</div>
-                <div class="detail">批次 ${escapeHtml(item.batchNo || '-')}</div>
-                <div class="quantity">
-                  <strong>${escapeHtml(item.weight)} ${escapeHtml(item.unit)}</strong>
-                  ${item.packages !== null ? `<strong>${item.packages} 件</strong>` : ''}
-                </div>
-                <div class="lot-no">${escapeHtml(item.lotNo || '历史库存')}</div>
-              </div>
-              <div class="qr">
-                ${qr ? `<img src="${escapeHtml(qr)}" alt="" />` : '<div class="no-qr">历史<br/>无二维码</div>'}
-              </div>
-            </section>
-          `,
-        )
-        .join('')
-      printWindow.document.write(`<!doctype html>
-        <html lang="zh-CN">
-          <head>
-            <meta charset="utf-8" />
-            <title>标签打印 - ${escapeHtml(order.orderNo)}</title>
-            <style>
-              @page { size: ${settings.width}mm ${settings.height}mm; margin: 0; }
-              * { box-sizing: border-box; }
-              html, body { margin: 0; padding: 0; }
-              body { color: #111; font-family: "Microsoft YaHei", "PingFang SC", sans-serif; }
-              .label {
-                width: ${settings.width}mm;
-                height: ${settings.height}mm;
-                padding: ${settings.padding + settings.topOffset}mm ${settings.padding}mm ${settings.padding}mm;
-                overflow: hidden;
-                display: grid;
-                grid-template-columns: minmax(0, 1fr) min(42%, 22mm);
-                gap: 1mm;
-                break-after: page;
-                page-break-after: always;
-                font-size: ${settings.fontSize}pt;
-              }
-              .label:last-child { break-after: auto; page-break-after: auto; }
-              .info { min-width: 0; display: flex; flex-direction: column; justify-content: center; line-height: 1.08; }
-              .order-no, .lot-no { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: .64em; }
-              .yarn-name { margin: .25mm 0; font-size: 1.4em; font-weight: 800; overflow-wrap: anywhere; }
-              .detail { font-size: .9em; overflow-wrap: anywhere; }
-              .quantity { display: flex; flex-wrap: wrap; gap: .5mm 1.5mm; margin-top: .45mm; font-size: 1.02em; }
-              .lot-no { margin-top: .45mm; font-weight: 700; }
-              .qr { min-width: 0; display: flex; align-items: center; justify-content: center; }
-              .qr img { display: block; width: 100%; max-width: 22mm; max-height: 22mm; object-fit: contain; image-rendering: pixelated; }
-              .no-qr { border: .3mm solid #777; padding: 2mm; text-align: center; font-size: .7em; }
-            </style>
-          </head>
-          <body>${labelHtml}</body>
-        </html>`)
-      printWindow.document.close()
       printWindow.focus()
-      window.setTimeout(() => printWindow.print(), 300)
+      printWindow.print()
     } catch {
-      setMessage('二维码生成失败，请刷新后重试')
+      if (!printWindow.closed) printWindow.close()
+      setMessage('标签生成或排版失败，请刷新后重试')
     } finally {
       setPrinting(false)
     }
@@ -247,6 +186,7 @@ export function LabelPrintButton({
             <p className="mt-1 text-sm text-gray-600">
               单号 {order.orderNo} · 默认每个批次一张 · 共打印 {totalCopies} 张
             </p>
+            {context && <p className="mt-1 text-sm text-blue-800">{context}</p>}
           </div>
           <button type="button" onClick={() => setOpen(false)} className="rounded px-2 py-1 text-gray-500 hover:bg-gray-200" aria-label="关闭标签预览">✕</button>
         </div>
@@ -276,7 +216,7 @@ export function LabelPrintButton({
                   ['height', '高度 (mm)', 1],
                   ['padding', '内边距 (mm)', 0.5],
                   ['topOffset', '顶部留白 (mm)', 0.5],
-                  ['fontSize', '基础字号', 1],
+                  ['fontSize', '基础字号上限 (pt)', 1],
                 ] as const).map(([key, text, step]) => (
                   <label key={key} className="text-sm">
                     {text}
@@ -285,7 +225,8 @@ export function LabelPrintButton({
                 ))}
               </div>
               <p className="text-xs leading-5 text-gray-500">
-                设置保存在当前电脑。二维码内容是系统内部批次码，扫码枪按键盘输入即可识别。
+                已启用自动缩字：各项内容尽量整行显示，最长字段单独缩小。最小字号为 5pt；仍放不下时会提示调整尺寸。
+                打印机纸张尺寸须与这里一致，缩放选 100%，关闭页眉页脚。设置保存在当前电脑。
               </p>
             </section>
 
@@ -318,22 +259,39 @@ export function LabelPrintButton({
           <section className="rounded-lg border bg-white p-3">
             <h3 className="font-semibold">效果预览</h3>
             <p className="mt-1 text-xs text-gray-500">一批只贴一个标签；如确有需要，可在左侧增加份数。</p>
-            <div className="mt-3 grid gap-3 sm:grid-cols-2">
+            <p className="mt-1 text-xs text-gray-500">下方预览与实际打印共用排版；长批次号使用整张标签宽度，不省略文字。</p>
+            <div className="mt-3 grid gap-3">
               {order.items.map((item, index) => (
                 <div key={`preview-${item.lotNo || index}`} className="space-y-1">
-                  <div className="mx-auto grid w-full max-w-[360px] grid-cols-[minmax(0,1fr)_38%] gap-2 overflow-hidden border-2 border-dashed border-gray-400 bg-white p-2 text-gray-950 shadow-sm" style={{ aspectRatio: `${settings.width} / ${settings.height}`, fontSize: `${Math.max(9, settings.fontSize)}px` }}>
-                    <div className="min-w-0 self-center leading-tight">
-                      <div className="truncate text-[.65em]">{order.orderNo}</div>
-                      <div className="text-[1.4em] font-extrabold [overflow-wrap:anywhere]">{item.yarnName}</div>
-                      <div>{item.spec} · {item.color}</div>
-                      <div>批次 {item.batchNo || '-'}</div>
-                      <div className="font-bold">{item.weight} {item.unit}{item.packages !== null ? ` · ${item.packages} 件` : ''}</div>
-                      <div className="truncate text-[.7em] font-bold">{item.lotNo || '历史库存'}</div>
-                    </div>
-                    <div className="flex items-center justify-center">
-                      {previewCodes[index] ? <img src={previewCodes[index]} alt="批次二维码" className="aspect-square w-full max-w-28 [image-rendering:pixelated]" /> : <div className="border p-2 text-center text-xs">历史库存<br />无二维码</div>}
-                    </div>
+                  <div className="max-w-full overflow-x-auto border border-dashed border-gray-400 bg-white">
+                    {previewReady ? (
+                      <iframe
+                        title={`标签效果预览 ${index + 1}`}
+                        srcDoc={previewDocuments[index]}
+                        style={{ width: `${settings.width}mm`, height: `${settings.height}mm`, border: 0, display: 'block' }}
+                        onLoad={async (event) => {
+                          const frame = event.currentTarget
+                          const doc = frame.contentDocument
+                          if (!doc) return
+                          const key = previewDocuments[index]
+                          try {
+                            const results = await fitLabelDocument(doc)
+                            if (frame.contentDocument !== doc) return
+                            setPreviewMessages((current) => ({ ...current, [key]: results[0]?.message ?? '暂无标签' }))
+                          } catch {
+                            if (frame.contentDocument === doc) setPreviewMessages((current) => ({ ...current, [key]: '预览生成失败，请重试' }))
+                          }
+                        }}
+                      />
+                    ) : (
+                      <div className="flex min-h-28 items-center justify-center px-4 text-sm text-gray-500" role="status">
+                        正在生成二维码并排版…
+                      </div>
+                    )}
                   </div>
+                  {previewReady ? (
+                    <p className="text-xs text-gray-600" role="status">{previewMessages[previewDocuments[index]] ?? '正在按纸张尺寸排版…'}</p>
+                  ) : null}
                   <p className="text-center text-xs text-gray-500">打印 {copies[index] ?? 0} 张</p>
                 </div>
               ))}
@@ -359,6 +317,9 @@ export function LabelPrintButton({
         onClick={() => {
           setMessage('')
           setCopies(defaultCopies(order))
+          setPreviewCodes([])
+          setPreviewReady(false)
+          setPreviewMessages({})
           setOpen(true)
         }}
         className={className}

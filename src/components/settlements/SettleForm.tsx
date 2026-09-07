@@ -3,11 +3,19 @@
 import { FormEvent, useEffect, useRef, useState } from 'react'
 import Link from 'next/link'
 import { useRouter } from 'next/navigation'
+import { ChoiceField } from '@/components/ui/ChoiceField'
+import { BusinessDateField } from '@/components/ui/BusinessDateField'
+import { Notice } from '@/components/ui/Notice'
+import { Table } from '@/components/ui/Table'
+import { useUnsavedChanges } from '@/hooks/useUnsavedChanges'
+import { formatNumber } from '@/lib/display'
 import { Button } from '@/components/ui/Button'
 import { Input } from '@/components/ui/Input'
 import { Select } from '@/components/ui/Select'
+import { businessDateToday } from '@/lib/business-date'
 import { OrderTraceLink } from '@/components/orders/OrderTraceLink'
 import type { CounterpartySummary } from '@/services/settlement'
+import { useIdempotentSubmit } from '@/hooks/useIdempotentSubmit'
 
 interface SettlementDetailRow {
   date: string
@@ -57,6 +65,9 @@ export function SettleForm({
   initialCounterpartyId?: string
 }) {
   const router = useRouter()
+  const { markDirty, markSaved } = useUnsavedChanges()
+  const [amount, setAmount] = useState('')
+  const { submit, submitting } = useIdempotentSubmit()
   const [side, setSide] = useState<'PURCHASE' | 'SALE' | 'PROCESSING_FEE'>(
     initialSide === 'SALE'
       ? 'SALE'
@@ -147,21 +158,25 @@ export function SettleForm({
       side,
       counterpartyId,
       amount: Number(form.get('amount')),
-      date: String(form.get('date') ?? new Date().toISOString().slice(0, 10)),
+      date: String(form.get('date') ?? businessDateToday()),
       method: String(form.get('method') ?? '') || null,
       handlerName: String(form.get('handlerName')),
     }
-    const res = await fetch(
-      side === 'PROCESSING_FEE' ? '/api/processing-fee-payments' : '/api/settlements',
-      {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(body),
-      },
-    )
+    const res = await submit((idempotencyKey) =>
+      fetch(
+        side === 'PROCESSING_FEE' ? '/api/processing-fee-payments' : '/api/settlements',
+        {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', 'Idempotency-Key': idempotencyKey },
+          body: JSON.stringify(body),
+        },
+      ),
+    ).catch(() => { setMessage('网络中断，填写内容已保留，请再次点击登记重试。'); return null })
+    if (!res) return
     if (res.ok) {
+      markSaved()
       setSaved(true)
-      e.currentTarget.reset()
+      setAmount('')
       setDetailsVersion((version) => version + 1)
       router.refresh()
     } else {
@@ -175,7 +190,8 @@ export function SettleForm({
       id="settle-form"
       ref={formRef}
       onSubmit={onSubmit}
-      className="grid scroll-mt-24 gap-3 rounded border bg-white p-4 sm:grid-cols-2 lg:grid-cols-6"
+      onChange={markDirty}
+      className="form-section grid scroll-mt-24 gap-4 sm:grid-cols-2 lg:grid-cols-3"
     >
       <label className="text-sm">
         方向
@@ -185,6 +201,7 @@ export function SettleForm({
             const nextSide = e.target.value as 'PURCHASE' | 'SALE' | 'PROCESSING_FEE'
             setSide(nextSide)
             setCounterpartyId('')
+            setAmount('')
             replaceSettlementQuery(nextSide, '')
           }}
         >
@@ -193,42 +210,17 @@ export function SettleForm({
           <option value="PROCESSING_FEE">付加工费给加工厂</option>
         </Select>
       </label>
-      <label className="text-sm">
-        往来单位
-        <Select
-          value={counterpartyId}
-          onChange={(e) => {
-            const nextCounterpartyId = e.target.value
-            setCounterpartyId(nextCounterpartyId)
-            replaceSettlementQuery(side, nextCounterpartyId)
-          }}
-          required
-        >
-          <option value="">选择往来单位</option>
-          {options.map((o) => (
-            <option key={o.id} value={o.id}>
-              {o.name}
-            </option>
-          ))}
-        </Select>
-      </label>
+      <ChoiceField label="往来单位" options={options} value={counterpartyId} memoryKey={"settle:" + side + ":" + defaultHandler} onChange={(value) => { markDirty(); setCounterpartyId(value); setAmount(""); replaceSettlementQuery(side, value) }} />
       <label className="text-sm">
         未结金额 (元)
-        <Input value={remaining} readOnly />
+        <Input value={remaining ? formatNumber(remaining) : ""} readOnly />
       </label>
       <label className="text-sm">
         结算金额 (元)
-        <Input type="number" step="0.01" min="0" name="amount" required placeholder="金额" />
+        <Input aria-label="结算金额 (元)" type="number" step="0.01" min="0.01" max={remaining || undefined} name="amount" value={amount} onChange={(event) => setAmount(event.target.value)} required placeholder="金额" />
+        <Button type="button" variant="secondary" className="mt-2" disabled={!counterpartyId || Number(remaining) <= 0} onClick={() => { markDirty(); setAmount(remaining) }}>全部结清</Button>
       </label>
-      <label className="text-sm">
-        结算日期
-        <Input
-          type="date"
-          name="date"
-          required
-          defaultValue={new Date().toISOString().slice(0, 10)}
-        />
-      </label>
+      <BusinessDateField label="结算日期" onChange={markDirty} />
       <label className="text-sm">
         方式
         <Select name="method">
@@ -243,21 +235,21 @@ export function SettleForm({
       </label>
       <label className="text-sm">
         经手人
-        <Select name="handlerName" defaultValue={defaultHandler ?? 'admin'} required>
-          <option value="admin">admin</option>
-          <option value="clerk">clerk</option>
+        <Select name="handlerName" defaultValue={defaultHandler ?? '刚'} required>
+          <option value="刚">刚</option>
+          <option value="萍">萍</option>
         </Select>
       </label>
-      <div className="flex items-end">
-        <Button type="submit" className="w-full">
-          登记结算
+      <div className="form-footer sm:col-span-2 lg:col-span-3"><p className="text-base font-semibold">{options.find((row) => row.id === counterpartyId)?.name ?? "请先选择往来单位"} · 本次 {side === "SALE" ? "收款" : "付款"} ¥{formatNumber(amount || 0)}</p>{counterpartyId && <p className="text-sm text-slate-600">登记后预计未结：¥{formatNumber(Number(remaining) - (Number(amount) || 0))}</p>}
+        <Button type="submit" disabled={submitting || !counterpartyId || !amount || Number(amount) <= 0 || Number(amount) > Number(remaining)} className="w-full">
+          {submitting ? '登记中…' : '登记结算'}
         </Button>
       </div>
-      {saved && <p className="text-sm text-green-600">结算已登记</p>}
-      {message && <p className="text-sm text-red-600">{message}</p>}
+      {saved && <Notice tone="success">结算已登记，可在下方明细核对。</Notice>}
+      <Notice>{message}</Notice>
 
       {counterpartyId ? (
-        <section className="space-y-3 border-t pt-4 sm:col-span-2 lg:col-span-6">
+        <section className="space-y-3 border-t pt-4 sm:col-span-2 lg:col-span-3">
           <div>
             <h2 className="font-bold">
               结算对象明细{details ? ` · ${details.name}` : ''}
@@ -273,27 +265,8 @@ export function SettleForm({
             <p className="rounded border bg-gray-50 p-3 text-sm text-gray-500">该对象暂无相关明细</p>
           ) : null}
           {details && details.rows.length > 0 ? (
-            <div className="overflow-x-auto rounded border bg-white">
-              <table className="w-full min-w-[1080px] text-sm">
-                <thead>
-                  <tr className="border-b bg-gray-50 text-left text-gray-600">
-                    {[
-                      '日期',
-                      '类型',
-                      '单号',
-                      '品名 / 规格 / 色号',
-                      '批次 / 内部批次',
-                      side === 'PROCESSING_FEE' ? '投入 / 产出' : '重量',
-                      side === 'PROCESSING_FEE' ? '加工单价' : '单价',
-                      '本笔金额',
-                      '累计余额',
-                      '说明',
-                    ].map((header) => (
-                      <th key={header} className="px-3 py-2 font-medium">{header}</th>
-                    ))}
-                  </tr>
-                </thead>
-                <tbody>
+            <Table headers={['日期', '类型', '单号', '品名 / 规格 / 色号', '批次 / 内部批次', side === 'PROCESSING_FEE' ? '投入 / 产出' : '重量', side === 'PROCESSING_FEE' ? '加工单价' : '单价', '本笔金额', '累计余额', '说明']}>
+
                   {details.rows.map((row, index) => (
                     <tr key={`${row.date}-${row.type}-${row.orderNo ?? 'record'}-${index}`} className="border-b last:border-b-0">
                       <td className="px-3 py-2">{row.date}</td>
@@ -336,9 +309,7 @@ export function SettleForm({
                       <td className="max-w-64 px-3 py-2 text-gray-600">{row.detail || '-'}</td>
                     </tr>
                   ))}
-                </tbody>
-              </table>
-            </div>
+            </Table>
           ) : null}
         </section>
       ) : null}

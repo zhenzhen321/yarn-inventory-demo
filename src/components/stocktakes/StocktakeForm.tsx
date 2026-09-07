@@ -2,11 +2,15 @@
 
 import { FormEvent, useMemo, useState } from 'react'
 import { useRouter } from 'next/navigation'
+import { Notice } from '@/components/ui/Notice'
+import { useUnsavedChanges } from '@/hooks/useUnsavedChanges'
 import { Button } from '@/components/ui/Button'
 import { Input } from '@/components/ui/Input'
 import { ExpressionInput } from '@/components/ui/ExpressionInput'
 import { Select } from '@/components/ui/Select'
 import { resolveNumeric } from '@/lib/expression'
+import { businessDateToday } from '@/lib/business-date'
+import { useIdempotentSubmit } from '@/hooks/useIdempotentSubmit'
 
 interface Option {
   id: string
@@ -36,6 +40,8 @@ export function StocktakeForm({
   zeroCountByWarehouse: Record<string, number>
 }) {
   const router = useRouter()
+  const { markDirty, markSaved } = useUnsavedChanges()
+  const { submit, submitting } = useIdempotentSubmit()
   const [warehouseId, setWarehouseId] = useState(warehouses[0]?.id ?? '')
   const [actual, setActual] = useState<Record<string, string>>({})
   const [message, setMessage] = useState('')
@@ -57,7 +63,7 @@ export function StocktakeForm({
     setNotice('')
     const form = new FormData(e.currentTarget)
     const body = {
-      date: String(form.get('date') ?? new Date().toISOString().slice(0, 10)),
+      date: String(form.get('date') ?? businessDateToday()),
       warehouseId,
       handlerName: String(form.get('handlerName')),
       note: String(form.get('note') ?? '') || null,
@@ -66,13 +72,17 @@ export function StocktakeForm({
         actualWeight: resolveNumeric(actual[r.id] ?? r.weight) ?? Number(actual[r.id] ?? r.weight),
       })),
     }
-    const res = await fetch('/api/stocktakes', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(body),
-    })
+    const res = await submit((idempotencyKey) =>
+      fetch('/api/stocktakes', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'Idempotency-Key': idempotencyKey },
+        body: JSON.stringify(body),
+      }),
+    ).catch(() => { setMessage('网络中断，填写内容已保留，请再次点击保存重试。'); return null })
+    if (!res) return
     if (res.ok) {
       const data = await res.json()
+      markSaved()
       setSavedOrderNo(data.orderNo)
       router.refresh()
     } else {
@@ -102,7 +112,7 @@ export function StocktakeForm({
   }
 
   return (
-    <form onSubmit={onSubmit} className="space-y-4">
+    <form onSubmit={onSubmit} onChange={markDirty} className="space-y-4">
       <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
         <label className="text-sm">
           日期
@@ -110,7 +120,7 @@ export function StocktakeForm({
             type="date"
             name="date"
             required
-            defaultValue={new Date().toISOString().slice(0, 10)}
+            defaultValue={businessDateToday()}
           />
         </label>
         <label className="text-sm">
@@ -125,9 +135,9 @@ export function StocktakeForm({
         </label>
         <label className="text-sm">
           经办人
-          <Select name="handlerName" defaultValue={defaultHandler ?? 'admin'} required>
-            <option value="admin">admin</option>
-            <option value="clerk">clerk</option>
+          <Select name="handlerName" defaultValue={defaultHandler ?? '刚'} required>
+            <option value="刚">刚</option>
+            <option value="萍">萍</option>
           </Select>
         </label>
         <label className="text-sm">
@@ -166,7 +176,9 @@ export function StocktakeForm({
         </table>
       </div>
       <div className="flex flex-wrap items-center gap-3">
-        <Button type="submit">保存盘点单</Button>
+        <Button type="submit" disabled={submitting}>
+          {submitting ? '保存中…' : '保存盘点单'}
+        </Button>
         <Button
           type="button"
           className="bg-red-600 hover:bg-red-700"
@@ -178,7 +190,7 @@ export function StocktakeForm({
       </div>
       {savedOrderNo && <p className="text-sm text-green-600">保存成功，单号：{savedOrderNo}</p>}
       {notice && <p className="text-sm text-green-600">{notice}</p>}
-      {message && <p className="text-sm text-red-600">{message}</p>}
+      <Notice>{message}</Notice>
 
       {confirmingZero && (
         <div

@@ -4,6 +4,7 @@ import { prisma } from '@/lib/prisma'
 import { getSessionUser } from '@/lib/auth'
 import { getCounterpartyStatement } from '@/services/settlement'
 import { getFactoryStatement } from '@/services/factory-fee'
+import { formatBusinessDate } from '@/lib/business-date'
 
 const querySchema = z.object({
   side: z.enum(['PURCHASE', 'SALE', 'PROCESSING_FEE']),
@@ -36,7 +37,7 @@ export async function GET(req: Request) {
       name: factory.name,
       side,
       rows: rows.map((row) => ({
-        date: row.date.toISOString().slice(0, 10),
+        date: formatBusinessDate(row.date),
         type: row.type,
         orderNo: null,
         yarnName: row.yarnName,
@@ -70,7 +71,7 @@ export async function GET(req: Request) {
     name: counterparty.name,
     side,
     rows: rows.map((row) => ({
-      date: row.date.toISOString().slice(0, 10),
+      date: formatBusinessDate(row.date),
       type: row.type,
       orderNo: row.orderNo === '-' ? null : row.orderNo,
       yarnName: row.yarnName,

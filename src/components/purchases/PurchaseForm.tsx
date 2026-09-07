@@ -2,11 +2,19 @@
 
 import { FormEvent, useState } from 'react'
 import { useRouter } from 'next/navigation'
+import { QuickChoices } from '@/components/ui/QuickChoices'
+import { ChoiceField } from '@/components/ui/ChoiceField'
+import { BusinessDateField } from '@/components/ui/BusinessDateField'
+import { Notice } from '@/components/ui/Notice'
+import { useUnsavedChanges } from '@/hooks/useUnsavedChanges'
+import { formatNumber } from '@/lib/display'
 import { Button } from '@/components/ui/Button'
 import { Input } from '@/components/ui/Input'
 import { ExpressionInput } from '@/components/ui/ExpressionInput'
 import { Select } from '@/components/ui/Select'
 import { resolveNumeric } from '@/lib/expression'
+import { businessDateToday } from '@/lib/business-date'
+import { useIdempotentSubmit } from '@/hooks/useIdempotentSubmit'
 import { LabelPrintButton, type LabelPrintOrder } from '@/components/labels/LabelPrintButton'
 import { OrderTraceLink } from '@/components/orders/OrderTraceLink'
 
@@ -46,6 +54,8 @@ export function PurchaseForm({
   defaultHandler?: string
 }) {
   const router = useRouter()
+  const { markDirty, markSaved, confirmDiscard } = useUnsavedChanges()
+  const { submit, submitting } = useIdempotentSubmit()
   const [rows, setRows] = useState<Row[]>(() => {
     const first = products[0]
     return [
@@ -61,11 +71,14 @@ export function PurchaseForm({
       },
     ]
   })
+  const [supplierId, setSupplierId] = useState(suppliers[0]?.id ?? '')
+  const [warehouseId, setWarehouseId] = useState(warehouses[0]?.id ?? '')
   const [message, setMessage] = useState('')
   const [savedOrderNo, setSavedOrderNo] = useState('')
   const [savedLabelOrder, setSavedLabelOrder] = useState<LabelPrintOrder | null>(null)
 
   function updateRow(idx: number, key: keyof Row, value: string) {
+    markDirty()
     setRows((prev) =>
       prev.map((r, i) => {
         if (i !== idx) return r
@@ -91,7 +104,7 @@ export function PurchaseForm({
     setMessage('')
     const form = new FormData(e.currentTarget)
     const body = {
-      date: String(form.get('date') ?? new Date().toISOString().slice(0, 10)),
+      date: String(form.get('date') ?? businessDateToday()),
       supplierId: String(form.get('supplierId')),
       warehouseId: String(form.get('warehouseId')),
       handlerName: String(form.get('handlerName')),
@@ -108,16 +121,20 @@ export function PurchaseForm({
         packages: r.packages ? Number(r.packages) : null,
       })),
     }
-    const res = await fetch('/api/purchases', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(body),
-    })
+    const res = await submit((idempotencyKey) =>
+      fetch('/api/purchases', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'Idempotency-Key': idempotencyKey },
+        body: JSON.stringify(body),
+      }),
+    ).catch(() => { setMessage('网络中断，填写内容已保留，请再次点击保存重试。'); return null })
+    if (!res) return
     if (res.ok) {
       const data = await res.json()
+      markSaved()
       setSavedOrderNo(data.orderNo)
       setSavedLabelOrder({ orderNo: data.orderNo, items: data.items })
-      const first = products[0]
+      const first = products.find((product) => product.id === rows[rows.length - 1]?.productId) ?? products[0]
       setRows([
         {
           productId: first?.id ?? '',
@@ -138,42 +155,16 @@ export function PurchaseForm({
   }
 
   return (
-    <form onSubmit={onSubmit} className="space-y-4">
-      <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
-        <label className="text-sm">
-          日期
-          <Input
-            type="date"
-            name="date"
-            required
-            defaultValue={new Date().toISOString().slice(0, 10)}
-          />
-        </label>
-        <label className="text-sm">
-          供应商
-          <Select name="supplierId" required>
-            {suppliers.map((s) => (
-              <option key={s.id} value={s.id}>
-                {s.name}
-              </option>
-            ))}
-          </Select>
-        </label>
-        <label className="text-sm">
-          入库/直送地点
-          <Select name="warehouseId" required>
-            {warehouses.map((w) => (
-              <option key={w.id} value={w.id}>
-                {w.name}{w.type === 'FACTORY' ? '（加工厂，供应商直送）' : ''}
-              </option>
-            ))}
-          </Select>
-        </label>
+    <form onSubmit={onSubmit} onChange={markDirty} className="space-y-5">
+      <div className="form-section grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
+<BusinessDateField onChange={markDirty} />
+<ChoiceField label="供应商" name="supplierId" options={suppliers} value={supplierId} onChange={(value) => { markDirty(); setSupplierId(value) }} memoryKey={"purchase:supplier:" + defaultHandler} />
+<ChoiceField label="入库/直送地点" name="warehouseId" options={warehouses.map((row) => ({ id: row.id, name: row.name + (row.type === "FACTORY" ? "（加工厂）" : "") }))} value={warehouseId} onChange={(value) => { markDirty(); setWarehouseId(value) }} memoryKey={"purchase:warehouse:" + defaultHandler} />
         <label className="text-sm">
           经办人
-          <Select name="handlerName" defaultValue={defaultHandler ?? 'admin'} required>
-            <option value="admin">admin</option>
-            <option value="clerk">clerk</option>
+          <Select name="handlerName" defaultValue={defaultHandler ?? '刚'} required>
+            <option value="刚">刚</option>
+            <option value="萍">萍</option>
           </Select>
         </label>
         <label className="text-sm">
@@ -200,91 +191,17 @@ export function PurchaseForm({
         return (
           <div
             key={idx}
-            className="grid gap-3 rounded border bg-white p-3 sm:grid-cols-2 lg:grid-cols-9"
+            className="form-section space-y-4"
           >
-            <Select
-              value={row.productId}
-              onChange={(e) => updateRow(idx, 'productId', e.target.value)}
-              required
-            >
-              <option value="">选择产品</option>
-              {products.map((p) => (
-                <option key={p.id} value={p.id}>
-                  {p.name}
-                </option>
-              ))}
-            </Select>
-            <Input
-              value={row.spec}
-              onChange={(e) => updateRow(idx, 'spec', e.target.value)}
-              placeholder="支数（如 32支）"
-              list={`specs-${idx}`}
-              required
-            />
-            <datalist id={`specs-${idx}`}>
-              {specs.map((s) => (
-                <option key={s} value={s} />
-              ))}
-            </datalist>
-            <Input
-              value={row.color}
-              onChange={(e) => updateRow(idx, 'color', e.target.value)}
-              placeholder="颜色（可填新色，自动建档）"
-              list={`colors-${idx}`}
-              required
-            />
-            <datalist id={`colors-${idx}`}>
-              {colors.map((c) => (
-                <option key={c} value={c} />
-              ))}
-            </datalist>
-            <Input
-              value={row.unit}
-              onChange={(e) => updateRow(idx, 'unit', e.target.value)}
-              placeholder="单位"
-              required
-            />
-            <Input
-              value={row.batchNo}
-              onChange={(e) => updateRow(idx, 'batchNo', e.target.value)}
-              placeholder="批次/缸号（可选）"
-            />
-            <ExpressionInput
-              value={row.weight}
-              onChange={(v) => updateRow(idx, 'weight', v)}
-              placeholder="重量 kg*"
-              required
-            />
-            <Input
-              type="number"
-              step="0.01"
-              min="0"
-              value={row.price}
-              onChange={(e) => updateRow(idx, 'price', e.target.value)}
-              placeholder="单价 元/kg*"
-              required
-            />
-            <Input
-              type="number"
-              step="1"
-              min="0"
-              value={row.packages}
-              onChange={(e) => updateRow(idx, 'packages', e.target.value)}
-              placeholder="包数（可选）"
-            />
-            <Button
-              type="button"
-              onClick={() => setRows((prev) => prev.filter((_, i) => i !== idx))}
-              className="bg-red-600 hover:bg-red-700"
-            >
-              删除
-            </Button>
+<div className="flex flex-wrap items-center justify-between gap-2"><h2 className="font-bold">第 {idx + 1} 批货</h2><div className="flex gap-2"><Button type="button" variant="secondary" onClick={() => { markDirty(); setRows((current) => [...current, { ...row, batchNo: "", weight: "", packages: "" }]) }}>复制品种</Button><Button type="button" variant="secondary" disabled={rows.length === 1} onClick={() => { markDirty(); setRows((current) => current.filter((_, index) => index !== idx)) }}>移除</Button></div></div>
+<div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4"><label className="field-label">品名<Select aria-label="品名" value={row.productId} onChange={(event) => updateRow(idx, "productId", event.target.value)} required><option value="">选择产品</option>{products.map((p) => <option key={p.id} value={p.id}>{p.name}</option>)}</Select></label><div className="space-y-2"><label className="field-label">支数<Input aria-label="支数" value={row.spec} onChange={(event) => updateRow(idx, "spec", event.target.value)} placeholder="如 32支" list={"specs-" + idx} required /></label><datalist id={"specs-" + idx}>{specs.map((value) => <option key={value} value={value} />)}</datalist><QuickChoices label="已有支数" values={specs} value={row.spec} onChange={(value) => updateRow(idx, "spec", value)} /></div><div className="space-y-2"><label className="field-label">色号<Input aria-label="色号" value={row.color} onChange={(event) => updateRow(idx, "color", event.target.value)} placeholder="可填写新色号" list={"colors-" + idx} required /></label><datalist id={"colors-" + idx}>{colors.map((value) => <option key={value} value={value} />)}</datalist><QuickChoices label="已有色号" values={colors} value={row.color} onChange={(value) => updateRow(idx, "color", value)} /></div><label className="field-label">单位<Input value={row.unit} onChange={(event) => updateRow(idx, "unit", event.target.value)} required /></label><label className="field-label">批次 / 缸号（选填）<Input value={row.batchNo} onChange={(event) => updateRow(idx, "batchNo", event.target.value)} /></label><label className="field-label">重量 (kg)<ExpressionInput value={row.weight} onChange={(value) => updateRow(idx, "weight", value)} placeholder="填写本批实际重量" required /></label><label className="field-label">单价 (元/kg)<Input type="number" step="0.01" min="0" value={row.price} onChange={(event) => updateRow(idx, "price", event.target.value)} required /></label><label className="field-label">件数（选填）<Input type="number" step="1" min="0" value={row.packages} onChange={(event) => updateRow(idx, "packages", event.target.value)} /></label></div><p className="text-sm text-slate-600">本批货款 <strong className="text-slate-900">¥{formatNumber((resolveNumeric(row.weight) ?? 0) * (Number(row.price) || 0))}</strong> · 复制品种后，请填写新批的重量和批号。</p>
           </div>
         )
       })}
       <Button
         type="button"
         onClick={() => {
+          markDirty()
           const first = products[0]
           setRows((prev) => [
             ...prev,
@@ -304,8 +221,8 @@ export function PurchaseForm({
         加一行
       </Button>
 
-      <div className="mt-8 space-y-3 border-t pt-6">
-        <p className="text-sm">合计：¥{total.toFixed(2)}</p>
+      <div className="form-footer">
+        <p className="text-base font-semibold">{rows.length} 批 · {formatNumber(rows.reduce((sum, row) => sum + (resolveNumeric(row.weight) ?? 0), 0))} kg · 货款合计 ¥{formatNumber(total)}</p><p className="text-sm text-slate-600">{suppliers.find((row) => row.id === supplierId)?.name} → {warehouses.find((row) => row.id === warehouseId)?.name}</p>
         {savedOrderNo && (
           <div className="flex flex-wrap items-center justify-between gap-3 rounded-lg border border-green-200 bg-green-50 p-3">
             <p className="text-sm font-medium text-green-700">
@@ -316,10 +233,10 @@ export function PurchaseForm({
             ) : null}
           </div>
         )}
-        {message && <p className="text-sm text-red-600">{message}</p>}
+        <Notice>{message}</Notice>
         <div className="flex justify-end">
-          <Button type="submit" className="w-full sm:w-auto sm:min-w-40">
-            保存入库单
+          <Button type="submit" disabled={submitting} className="w-full sm:w-auto sm:min-w-40">
+            {submitting ? '保存中…' : '保存入库单'}
           </Button>
         </div>
       </div>

@@ -169,12 +169,12 @@ export function OrderTable({
                           className="px-2 py-1 text-xs"
                         />
                       ) : null}
-                      {canRevert ? <RevertButton href={revertHref} label="撤回本单" /> : null}
+                      {canRevert ? <RevertButton href={revertHref} label="撤回本单" subject={order.orderNo + " · " + order.counterpartyName + " · ¥" + order.totalAmount} /> : null}
                     </div>
                   </div>
 
-                  <div className="overflow-x-auto rounded border bg-white">
-                    <table className="w-full min-w-[780px] text-sm">
+                  <div className="detail-table-shell overflow-x-auto rounded border bg-white">
+                    <table className="detail-table w-full min-w-[780px] text-sm">
                       <thead>
                         <tr className="border-b bg-gray-50 text-left text-gray-600">
                           {['品名', '支数', '色号', '单位', '批次', '内部批次', '重量', '单价', '金额', '件数'].map(
@@ -187,22 +187,22 @@ export function OrderTable({
                       <tbody>
                         {order.items.map((item, index) => (
                           <tr key={`${order.id}-${index}`} className="border-b last:border-b-0">
-                            <td className="px-3 py-2">{item.yarnName}</td>
-                            <td className="px-3 py-2">{item.spec}</td>
-                            <td className="px-3 py-2">{item.color}</td>
-                            <td className="px-3 py-2">{item.unit}</td>
-                            <td className="px-3 py-2">{item.batchNo}</td>
-                            <td className="px-3 py-2">
+                            <td data-label="品名" className="px-3 py-2">{item.yarnName}</td>
+                            <td data-label="支数" className="px-3 py-2">{item.spec}</td>
+                            <td data-label="色号" className="px-3 py-2">{item.color}</td>
+                            <td data-label="单位" className="px-3 py-2">{item.unit}</td>
+                            <td data-label="批次" className="px-3 py-2">{item.batchNo}</td>
+                            <td data-label="内部批次" className="px-3 py-2">
                               {item.lotId ? (
                                 <Link href={`/app/lots/${item.lotId}`} className="text-blue-700 hover:underline">
                                   {item.lotNo}
                                 </Link>
                               ) : '-'}
                             </td>
-                            <td className="px-3 py-2">{item.weight}</td>
-                            <td className="px-3 py-2">{item.price}</td>
-                            <td className="px-3 py-2">{item.amount}</td>
-                            <td className="px-3 py-2">{item.packages ?? '-'}</td>
+                            <td data-label="重量" className="px-3 py-2">{item.weight}</td>
+                            <td data-label="单价" className="px-3 py-2">{item.price}</td>
+                            <td data-label="金额" className="px-3 py-2">{item.amount}</td>
+                            <td data-label="件数" className="px-3 py-2">{item.packages ?? '-'}</td>
                           </tr>
                         ))}
                       </tbody>

@@ -22,7 +22,7 @@ export default async function NewPurchasePage() {
     <div className="space-y-4">
       <h1 className="text-xl font-bold">买入入库</h1>
       <PurchaseForm
-        defaultHandler={user?.name ?? 'admin'}
+        defaultHandler={user?.name ?? '刚'}
         products={products
           .filter((p) => p.variants.length > 0)
           .map((p) => ({

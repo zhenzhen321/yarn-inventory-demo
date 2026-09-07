@@ -4,6 +4,8 @@ import { prisma } from '@/lib/prisma'
 import { Table } from '@/components/ui/Table'
 import { LotBackLink } from '@/components/lots/LotBackLink'
 import { OrderTraceLink } from '@/components/orders/OrderTraceLink'
+import { CurrentInventoryLabelButton } from '@/components/labels/CurrentInventoryLabelButton'
+import { formatBusinessDate } from '@/lib/business-date'
 
 const movementLabels: Record<string, string> = {
   PURCHASE_RECEIPT: '采购入库',
@@ -117,7 +119,7 @@ export default async function LotTracePage({
         <h2 className="text-lg font-bold">来源</h2>
         {lot.purchaseItem ? (
           <div className="rounded border bg-white p-3 text-sm">
-            采购单 <OrderTraceLink orderNo={lot.purchaseItem.order.orderNo} orderType="PURCHASE" /> · {lot.purchaseItem.order.date.toISOString().slice(0, 10)} ·
+            采购单 <OrderTraceLink orderNo={lot.purchaseItem.order.orderNo} orderType="PURCHASE" /> · {formatBusinessDate(lot.purchaseItem.order.date)} ·
             供应商 {lot.purchaseItem.order.supplier.name} · 入库/直送 {lot.purchaseItem.order.warehouse.name} ·
             {lot.purchaseItem.weight.toString()} kg @ ¥{lot.purchaseItem.price.toString()}
             {lot.purchaseItem.order.reversedAt ? ' · 该采购单已撤回' : ''}
@@ -150,15 +152,31 @@ export default async function LotTracePage({
 
       <section className="space-y-2">
         <h2 className="text-lg font-bold">当前位置</h2>
-        <Table headers={['地点', '重量 (kg)', '件数', '状态']}>
+        <Table headers={['地点', '重量 (kg)', '件数', '状态', '标签']}>
           {activeBalances.length === 0 ? (
-            <tr><td colSpan={4} className="text-center text-gray-500">当前无可用库存</td></tr>
+            <tr><td colSpan={5} className="text-center text-gray-500">当前无可用库存</td></tr>
           ) : activeBalances.map((row) => (
             <tr key={row.id}>
               <td>{row.warehouse.name}</td>
               <td>{row.weight.toString()}</td>
               <td>{row.packages ?? '-'}</td>
               <td>{row.processingFeeSettled ? '成品已核算' : row.warehouse.type === 'FACTORY' ? '待加工' : '可用'}</td>
+              <td>
+                <CurrentInventoryLabelButton row={{
+                  sourceNo: lot.processingOutput?.job.orderNo ?? lot.purchaseItem?.order.orderNo ?? lot.lotNo,
+                  warehouseName: row.warehouse.name,
+                  yarnName: lot.variant.yarn.name,
+                  spec: lot.variant.spec,
+                  color: lot.variant.color,
+                  unit: lot.variant.unit,
+                  batchNo: lot.batch.batchNo,
+                  lotNo: lot.lotNo,
+                  scanCode: lot.scanCode,
+                  weight: row.weight.toString(),
+                  packages: row.packages,
+                  archived: row.archived,
+                }} />
+              </td>
             </tr>
           ))}
         </Table>
@@ -172,7 +190,7 @@ export default async function LotTracePage({
             const to = lot.inventories.find((row) => row.warehouseId === movement.toWarehouseId)?.warehouse.name
             return (
               <tr key={movement.id}>
-                <td>{movement.occurredAt.toISOString().slice(0, 10)}</td>
+                <td>{formatBusinessDate(movement.occurredAt)}</td>
                 <td>{movementLabels[movement.type] ?? movement.type}</td>
                 <td>{from ?? '-'}</td>
                 <td>{to ?? '-'}</td>
@@ -192,7 +210,7 @@ export default async function LotTracePage({
             {lot.saleAllocations.map((allocation) => (
               <tr key={allocation.id}>
                 <td><OrderTraceLink orderNo={allocation.saleItem.order.orderNo} orderType="SALE" /></td>
-                <td>{allocation.saleItem.order.date.toISOString().slice(0, 10)}</td>
+                <td>{formatBusinessDate(allocation.saleItem.order.date)}</td>
                 <td>{allocation.saleItem.order.customer.name}</td>
                 <td>{allocation.saleItem.order.warehouse.name}</td>
                 <td>{allocation.weight.toString()} kg</td>

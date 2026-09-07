@@ -1,9 +1,10 @@
 import { NextResponse } from 'next/server'
 import { prisma } from '@/lib/prisma'
 import { stocktakeSchema } from '@/lib/validation'
-import { createStocktake } from '@/services/inventory'
+import { createStocktakeIdempotent } from '@/services/inventory'
 import { getSessionUser } from '@/lib/auth'
 import { logAudit } from '@/lib/audit'
+import { idempotencyKeyFromRequest } from '@/services/idempotency'
 
 export async function POST(req: Request) {
   const user = await getSessionUser()
@@ -17,14 +18,21 @@ export async function POST(req: Request) {
     )
   }
   try {
-    const stocktake = await createStocktake(prisma, parsed.data)
-    await logAudit({
+    const result = await createStocktakeIdempotent(prisma, parsed.data, idempotencyKeyFromRequest(req))
+    const stocktake = result.value
+    if (!result.replayed) await logAudit({
       userName: user?.name ?? '未知',
       action: 'STOCKTAKE_CREATE',
       target: '盘库',
       detail: `单号 ${stocktake.orderNo}，仓库 ${stocktake.warehouse.name}`,
     })
-    return NextResponse.json({ orderNo: stocktake.orderNo }, { status: 201 })
+    return NextResponse.json(
+      { orderNo: stocktake.orderNo },
+      {
+        status: result.replayed ? 200 : 201,
+        headers: { 'Idempotent-Replayed': String(result.replayed) },
+      },
+    )
   } catch (e) {
     const message = e instanceof Error ? e.message : '保存失败'
     return NextResponse.json({ error: message }, { status: 400 })

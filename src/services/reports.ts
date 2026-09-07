@@ -184,10 +184,21 @@ export interface ProfitEstimate {
 }
 
 export async function getProfitEstimate(db: PrismaClient): Promise<ProfitEstimate> {
-  const [saleOrders, saleItems] = await Promise.all([
-    db.saleOrder.findMany({ where: { reversedAt: null } }),
-    db.saleItem.findMany({ where: { order: { reversedAt: null } } }),
+  const saleOrders = await db.saleOrder.findMany({ where: { reversedAt: null } })
+  const orderIds = saleOrders.map((order) => order.id)
+  const [saleItems, saleMovements] = await Promise.all([
+    db.saleItem.findMany({ where: { orderId: { in: orderIds } } }),
+    db.stockMovement.findMany({
+      where: { type: 'SALE', referenceType: 'SALE', referenceId: { in: orderIds } },
+    }),
   ])
+  const movementByItem = new Map<string, (typeof saleMovements)[number][]>()
+  for (const movement of saleMovements) {
+    if (!movement.referenceItemId) continue
+    const rows = movementByItem.get(movement.referenceItemId) ?? []
+    rows.push(movement)
+    movementByItem.set(movement.referenceItemId, rows)
+  }
   let saleGoodsTotal = new Prisma.Decimal(0)
   let saleFreightTotal = new Prisma.Decimal(0)
   let estimatedCost = new Prisma.Decimal(0)
@@ -197,8 +208,16 @@ export async function getProfitEstimate(db: PrismaClient): Promise<ProfitEstimat
     saleFreightTotal = saleFreightTotal.plus(o.freight)
   }
   for (const it of saleItems) {
-    estimatedCost = estimatedCost.plus(new Prisma.Decimal(it.weight).mul(it.unitCost))
-    estimatedFreight = estimatedFreight.plus(new Prisma.Decimal(it.weight).mul(it.unitFreight))
+    const movements = movementByItem.get(it.id)
+    if (movements?.length) {
+      for (const movement of movements) {
+        estimatedCost = estimatedCost.plus(movement.goodsCost)
+        estimatedFreight = estimatedFreight.plus(movement.freightCost)
+      }
+    } else {
+      estimatedCost = estimatedCost.plus(new Prisma.Decimal(it.weight).mul(it.unitCost))
+      estimatedFreight = estimatedFreight.plus(new Prisma.Decimal(it.weight).mul(it.unitFreight))
+    }
   }
   const estimatedProfit = saleGoodsTotal
     .minus(estimatedCost)

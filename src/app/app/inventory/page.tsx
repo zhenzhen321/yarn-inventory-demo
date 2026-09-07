@@ -1,9 +1,11 @@
 import Link from 'next/link'
 import { prisma } from '@/lib/prisma'
+import { businessDateToday, formatBusinessDate } from '@/lib/business-date'
 import { buildInventoryGroups } from '@/lib/inventory-presentation'
 import { getInventoryRows } from '@/services/inventory'
 import { Table } from '@/components/ui/Table'
 import { InventoryFilter } from '@/components/inventory/InventoryFilter'
+import { CurrentInventoryLabelButton } from '@/components/labels/CurrentInventoryLabelButton'
 import {
   ProcessingFeeSettle,
   type FactoryInventoryRow,
@@ -52,6 +54,8 @@ export default async function InventoryPage({
       batchNo: row.batch.batchNo,
       lotId: row.lot?.id ?? null,
       lotNo: row.lot?.lotNo ?? null,
+      scanCode: row.lot?.scanCode ?? null,
+      archived: row.archived,
       weight: row.weight.toString(),
       packages: row.packages,
       cost: row.cost.toString(),
@@ -61,7 +65,11 @@ export default async function InventoryPage({
       sourceType,
       sourceId: source?.id ?? row.lot?.id ?? null,
       sourceNo: source?.orderNo ?? row.lot?.lotNo ?? '历史汇总库存',
-      sourceDate: (source?.date ?? row.lot?.createdAt)?.toISOString().slice(0, 10) ?? null,
+      sourceDate: source?.date
+        ? formatBusinessDate(source.date)
+        : row.lot?.createdAt
+          ? businessDateToday(row.lot.createdAt)
+          : null,
     }
   })
   const groups = buildInventoryGroups(presentationRows)
@@ -69,7 +77,9 @@ export default async function InventoryPage({
     .filter((row) => row.warehouse.type === 'FACTORY')
     .map((row) => ({
       id: row.id,
+      warehouseId: row.warehouseId,
       warehouseName: row.warehouse.name,
+      yarnId: row.variant.yarnId,
       yarnName: row.variant.yarn.name,
       spec: row.variant.spec,
       color: row.variant.color,
@@ -79,6 +89,7 @@ export default async function InventoryPage({
       weight: Number(row.weight),
       packages: row.packages,
       cost: Number(row.cost),
+      freight: Number(row.freight),
       feePerKg: row.processingFeePerKg ? Number(row.processingFeePerKg) : null,
       settled: row.processingFeeSettled,
     }))
@@ -96,10 +107,11 @@ export default async function InventoryPage({
         {total.toFixed(2)} kg
       </p>
 
-      <div className="overflow-x-auto rounded border bg-white text-sm">
+      {groups.length === 0 && <div className="form-section text-slate-600">没有符合条件的库存。可清空筛选，或在收到货时登记买入入库。</div>}
+      <div className="inventory-ledger overflow-x-auto rounded-xl border bg-white text-sm">
         <div className="min-w-[1180px]">
           <div
-            className={`grid ${inventoryGridColumns} gap-3 border-b bg-gray-50 px-3 py-2 font-medium text-gray-600 [&>span]:whitespace-nowrap`}
+            className={`inventory-heading grid ${inventoryGridColumns} gap-3 border-b bg-gray-50 px-3 py-2 font-medium text-gray-600 [&>span]:whitespace-nowrap`}
           >
             <span>来源单据</span>
             <span>日期</span>
@@ -119,7 +131,7 @@ export default async function InventoryPage({
             return (
               <details key={group.key} className="group border-b last:border-b-0">
                 <summary
-                  className={`grid cursor-pointer list-none ${inventoryGridColumns} items-center gap-3 px-3 py-3 hover:bg-gray-50`}
+                  className={`inventory-summary grid cursor-pointer list-none ${inventoryGridColumns} items-center gap-3 px-3 py-3 hover:bg-gray-50`}
                 >
                   <span className="font-medium text-blue-800">
                     <span className="mr-1 inline-block transition-transform group-open:rotate-90">▶</span>
@@ -128,14 +140,14 @@ export default async function InventoryPage({
                       {sourceLabel(group.sourceType)}
                     </span>
                   </span>
-                  <span>{group.sourceDate ?? '-'}</span>
-                  <span>{group.warehouseName}</span>
-                  <span>{group.yarnSummary}</span>
-                  <span>{group.colorSummary}</span>
-                  <span>{group.rows.length}</span>
-                  <span>{group.weight.toFixed(2)} kg</span>
-                  <span>{group.packages ?? '-'}</span>
-                  <span className="whitespace-nowrap">¥{totalUnit}/kg</span>
+                  <span data-label="日期">{group.sourceDate ?? '-'}</span>
+                  <span data-label="仓库">{group.warehouseName}</span>
+                  <span data-label="品名">{group.yarnSummary}</span>
+                  <span data-label="色号">{group.colorSummary}</span>
+                  <span data-label="批次数">{group.rows.length}</span>
+                  <span data-label="重量">{group.weight.toFixed(2)} kg</span>
+                  <span data-label="件数">{group.packages ?? '-'}</span>
+                  <span data-label="含运费单价" className="whitespace-nowrap">¥{totalUnit}/kg</span>
                 </summary>
                 <div className="border-t bg-gray-50/60 p-3">
                   <Table
@@ -151,6 +163,7 @@ export default async function InventoryPage({
                       '单位成本',
                       '单位运费',
                       '加工费状态',
+                      '标签',
                     ]}
                   >
                     {group.rows.map((row) => {
@@ -188,6 +201,7 @@ export default async function InventoryPage({
                           <td>{unitCost}</td>
                           <td>{unitFreight}</td>
                           <td>{feeStatus}</td>
+                          <td><CurrentInventoryLabelButton row={row} /></td>
                         </tr>
                       )
                     })}

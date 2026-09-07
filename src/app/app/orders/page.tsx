@@ -5,6 +5,7 @@ import { OrderTable } from '@/components/orders/OrderTable'
 import { PrintButton } from '@/components/orders/PrintButton'
 import { ExportLink } from '@/components/reports/ExportLink'
 import { getOrderRecords } from '@/services/orders'
+import { formatBusinessDate } from '@/lib/business-date'
 
 export default async function OrdersPage({
   searchParams,
@@ -64,7 +65,7 @@ export default async function OrdersPage({
           id: order.id,
           orderType: order.orderType,
           orderNo: order.orderNo,
-          date: order.date.toISOString().slice(0, 10),
+          date: formatBusinessDate(order.date),
           counterpartyName: order.counterpartyName,
           warehouseName: order.warehouseName,
           handlerName: order.handlerName,

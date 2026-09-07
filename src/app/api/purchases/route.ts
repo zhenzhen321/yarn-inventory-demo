@@ -1,9 +1,10 @@
 import { NextResponse } from 'next/server'
 import { prisma } from '@/lib/prisma'
 import { purchaseSchema } from '@/lib/validation'
-import { createPurchase } from '@/services/inventory'
+import { createPurchaseIdempotent } from '@/services/inventory'
 import { getSessionUser } from '@/lib/auth'
 import { logAudit } from '@/lib/audit'
+import { idempotencyKeyFromRequest } from '@/services/idempotency'
 
 export async function POST(req: Request) {
   const user = await getSessionUser()
@@ -17,8 +18,13 @@ export async function POST(req: Request) {
     )
   }
   try {
-    const order = await createPurchase(prisma, parsed.data)
-    await logAudit({
+    const result = await createPurchaseIdempotent(
+      prisma,
+      parsed.data,
+      idempotencyKeyFromRequest(req),
+    )
+    const order = result.value
+    if (!result.replayed) await logAudit({
       userName: user?.name ?? '未知',
       action: 'PURCHASE_CREATE',
       target: '买入入库',
@@ -39,7 +45,10 @@ export async function POST(req: Request) {
           scanCode: item.lot?.scanCode ?? null,
         })),
       },
-      { status: 201 },
+      {
+        status: result.replayed ? 200 : 201,
+        headers: { 'Idempotent-Replayed': String(result.replayed) },
+      },
     )
   } catch (e) {
     const message = e instanceof Error ? e.message : '保存失败'

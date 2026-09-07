@@ -265,6 +265,19 @@ model AuditLog {
   createdAt DateTime @default(now())
 }
 
+model IdempotencyRequest {
+  id          String    @id @default(cuid())
+  operation   String
+  key         String
+  requestHash String
+  resourceId  String?
+  createdAt   DateTime  @default(now())
+  completedAt DateTime?
+
+  @@unique([operation, key])
+  @@index([createdAt])
+}
+
 model ProcessingReturn {
   id                     String                 @id @default(cuid())
   orderNo                String                 @unique
@@ -404,28 +417,29 @@ model SaleAllocation {
 }
 
 model ProcessingJob {
-  id              String                   @id @default(cuid())
-  orderNo         String                   @unique
-  date            DateTime
-  factoryId       String
-  factory         Warehouse                @relation("ProcessingJobFactory", fields: [factoryId], references: [id])
-  status          String                   @default("COMPLETED") // DRAFT | AT_FACTORY | PROCESSING | COMPLETED | CLOSED | REVERSED
-  feeBasis        String                   @default("OUTPUT") // INPUT | OUTPUT | FACTORY_WEIGHT | FIXED
-  chargedWeight   Decimal
-  feePerKg        Decimal
-  feeTotal        Decimal
-  outboundFreight Decimal                  @default(0)
-  returnFreight   Decimal                  @default(0)
-  otherCost       Decimal                  @default(0)
-  inputWeight     Decimal
-  outputWeight    Decimal
-  weightDiff      Decimal
-  handlerName     String
-  note            String?
-  createdAt       DateTime                 @default(now())
-  inputs          ProcessingInput[]
-  outputs         ProcessingOutput[]
-  feeSettlement   ProcessingFeeSettlement?
+  id                  String                   @id @default(cuid())
+  orderNo             String                   @unique
+  date                DateTime
+  factoryId           String
+  factory             Warehouse                @relation("ProcessingJobFactory", fields: [factoryId], references: [id])
+  status              String                   @default("COMPLETED") // DRAFT | AT_FACTORY | PROCESSING | COMPLETED | CLOSED | REVERSED
+  feeBasis            String                   @default("OUTPUT") // INPUT | OUTPUT | FACTORY_WEIGHT | FIXED
+  chargedWeight       Decimal
+  feePerKg            Decimal
+  feeTotal            Decimal
+  costAllocationBasis String                   @default("OUTPUT_WEIGHT")
+  outboundFreight     Decimal                  @default(0)
+  returnFreight       Decimal                  @default(0)
+  otherCost           Decimal                  @default(0)
+  inputWeight         Decimal
+  outputWeight        Decimal
+  weightDiff          Decimal
+  handlerName         String
+  note                String?
+  createdAt           DateTime                 @default(now())
+  inputs              ProcessingInput[]
+  outputs             ProcessingOutput[]
+  feeSettlement       ProcessingFeeSettlement?
 
   @@index([factoryId, date])
 }
@@ -457,6 +471,10 @@ model ProcessingOutput {
   packages           Int?
   allocatedGoodsCost Decimal
   allocatedFreight   Decimal
+
+  allocationWeight        Decimal @default(0)
+  allocatedProcessingCost Decimal @default(0)
+  allocatedOtherCost      Decimal @default(0)
 
   @@index([jobId])
 }

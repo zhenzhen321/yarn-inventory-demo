@@ -1,9 +1,10 @@
 import { NextResponse } from 'next/server'
 import { prisma } from '@/lib/prisma'
 import { saleSchema } from '@/lib/validation'
-import { createSale } from '@/services/inventory'
+import { createSaleIdempotent } from '@/services/inventory'
 import { getSessionUser } from '@/lib/auth'
 import { logAudit } from '@/lib/audit'
+import { idempotencyKeyFromRequest } from '@/services/idempotency'
 
 export async function POST(req: Request) {
   const user = await getSessionUser()
@@ -17,14 +18,21 @@ export async function POST(req: Request) {
     )
   }
   try {
-    const order = await createSale(prisma, parsed.data)
-    await logAudit({
+    const result = await createSaleIdempotent(prisma, parsed.data, idempotencyKeyFromRequest(req))
+    const order = result.value
+    if (!result.replayed) await logAudit({
       userName: user?.name ?? '未知',
       action: 'SALE_CREATE',
       target: '卖出出库',
       detail: `单号 ${order.orderNo}，客户 ${order.customer.name}，货款 ${order.totalAmount}，运费 ${order.freight}`,
     })
-    return NextResponse.json({ orderNo: order.orderNo }, { status: 201 })
+    return NextResponse.json(
+      { orderNo: order.orderNo },
+      {
+        status: result.replayed ? 200 : 201,
+        headers: { 'Idempotent-Replayed': String(result.replayed) },
+      },
+    )
   } catch (e) {
     const message = e instanceof Error ? e.message : '保存失败'
     return NextResponse.json({ error: message }, { status: 400 })

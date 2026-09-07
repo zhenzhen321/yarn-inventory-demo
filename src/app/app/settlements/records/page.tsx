@@ -5,6 +5,7 @@ import { RevertButton } from '@/components/common/RevertButton'
 import { SettlementPageHeader } from '@/components/settlements/SettlementPageHeader'
 import { SettlementRecordsFilter } from '@/components/settlements/SettlementRecordsFilter'
 import { getSettlementRecords } from '@/services/settlement'
+import { businessDateFromInput, formatBusinessDate } from '@/lib/business-date'
 
 export default async function SettlementRecordsPage({
   searchParams,
@@ -22,8 +23,8 @@ export default async function SettlementRecordsPage({
     getSettlementRecords(prisma, {
       side: (filters.recSide as 'PURCHASE' | 'SALE') || undefined,
       counterpartyId: filters.recCounterpartyId,
-      from: filters.recFrom ? new Date(filters.recFrom) : undefined,
-      to: filters.recTo ? new Date(filters.recTo) : undefined,
+      from: filters.recFrom ? businessDateFromInput(filters.recFrom) : undefined,
+      to: filters.recTo ? businessDateFromInput(filters.recTo) : undefined,
     }),
     getSessionUser(),
   ])
@@ -47,7 +48,7 @@ export default async function SettlementRecordsPage({
           <tr key={record.id}>
             <td>{record.side === 'PURCHASE' ? '买入应付' : '卖出应收'}</td>
             <td>{record.counterpartyName}</td>
-            <td>{record.date.toISOString().slice(0, 10)}</td>
+            <td>{formatBusinessDate(record.date)}</td>
             <td>{record.amount.toString()}</td>
             <td>{record.method ?? '-'}</td>
             <td>{record.handlerName}</td>

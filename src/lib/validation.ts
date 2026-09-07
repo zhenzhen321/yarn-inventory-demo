@@ -1,6 +1,16 @@
 import { z, type RefinementCtx } from 'zod'
+import { businessDateFromInput, formatBusinessDate } from '@/lib/business-date'
 
 export const handlerNameSchema = z.enum(['admin', 'clerk'])
+
+const businessDateSchema = z.union([z.string(), z.date()]).transform((value, ctx) => {
+  try {
+    return businessDateFromInput(value instanceof Date ? formatBusinessDate(value) : value)
+  } catch {
+    ctx.addIssue({ code: 'custom', message: '业务日期不正确' })
+    return z.NEVER
+  }
+})
 
 function rejectDuplicateInventoryItems(
   items: { inventoryId: string }[],
@@ -52,7 +62,7 @@ export const processingReturnItemSchema = z.object({
 })
 
 export const processingReturnSchema = z.object({
-  date: z.coerce.date(),
+  date: businessDateSchema,
   factoryId: z.string().min(1, '请选择加工厂'),
   warehouseId: z.string().min(1, '请选择目标仓库'),
   handlerName: handlerNameSchema,
@@ -100,7 +110,7 @@ export const purchaseItemSchema = z
   })
 
 export const purchaseSchema = z.object({
-  date: z.coerce.date(),
+  date: businessDateSchema,
   supplierId: z.string().min(1, '请选择供应商'),
   warehouseId: z.string().min(1, '请选择仓库'),
   handlerName: handlerNameSchema,
@@ -121,7 +131,7 @@ export const saleItemSchema = z.object({
 })
 
 export const saleSchema = z.object({
-  date: z.coerce.date(),
+  date: businessDateSchema,
   customerId: z.string().min(1, '请选择客户'),
   warehouseId: z.string().min(1, '请选择仓库'),
   handlerName: handlerNameSchema,
@@ -139,7 +149,7 @@ export const transferItemSchema = z.object({
 })
 
 export const transferSchema = z.object({
-  date: z.coerce.date(),
+  date: businessDateSchema,
   fromWarehouseId: z.string().min(1, '请选择来源仓库'),
   toWarehouseId: z.string().min(1, '请选择目标仓库'),
   handlerName: handlerNameSchema,
@@ -157,7 +167,7 @@ export const stocktakeItemSchema = z.object({
 })
 
 export const stocktakeSchema = z.object({
-  date: z.coerce.date(),
+  date: businessDateSchema,
   warehouseId: z.string().min(1, '请选择仓库'),
   handlerName: handlerNameSchema,
   note: z.string().optional().nullable(),
@@ -170,7 +180,7 @@ export const settlementSchema = z.object({
   side: z.enum(['PURCHASE', 'SALE'], { message: '方向不正确' }),
   counterpartyId: z.string().min(1, '请选择往来单位'),
   amount: z.coerce.number().positive('结算金额必须大于 0'),
-  date: z.coerce.date(),
+  date: businessDateSchema,
   method: z.string().optional().nullable(),
   handlerName: handlerNameSchema,
 })
@@ -178,9 +188,35 @@ export const settlementSchema = z.object({
 export const processingFeePaymentSchema = z.object({
   factoryId: z.string().min(1, '请选择加工厂'),
   amount: z.coerce.number().positive('付款金额必须大于 0'),
-  date: z.coerce.date(),
+  date: businessDateSchema,
   method: z.string().optional().nullable(),
   handlerName: handlerNameSchema,
+})
+
+export const processingJobCompletionSchema = z.object({
+  date: businessDateSchema,
+  factoryId: z.string().min(1, '请选择加工厂'),
+  feePerKg: z.coerce.number().nonnegative('加工费不能为负'),
+  additionalFreight: z.coerce.number().nonnegative('附加运费不能为负').default(0),
+  otherCost: z.coerce.number().nonnegative('其他费用不能为负').default(0),
+  note: z.string().optional().nullable(),
+  inputs: z.array(z.object({
+    inventoryId: z.string().min(1, '请选择投入批次'),
+    weight: z.coerce.number().positive('投入重量必须大于 0'),
+    packages: z.coerce.number().int().nonnegative('投入件数不能为负').optional().nullable(),
+  })).min(1, '至少选择一个投入批次'),
+  outputs: z.array(z.object({
+    yarnId: z.string().min(1, '请选择成品品名'),
+    spec: z.string().trim().min(1, '成品支数必填'),
+    color: z.string().trim().min(1, '成品色号必填'),
+    unit: z.string().trim().min(1, '成品单位必填'),
+    batchNo: z.string().trim().min(1, '成品批次必填'),
+    weight: z.coerce.number().positive('成品重量必须大于 0'),
+    packages: z.coerce.number().int().nonnegative('成品件数不能为负').optional().nullable(),
+    allocationWeight: z.coerce.number().positive('分配权重必须大于 0').optional(),
+  })).min(1, '至少填写一个成品批次'),
+}).superRefine((value, ctx) => {
+  rejectDuplicateInventoryItems(value.inputs, ctx)
 })
 
 export const archiveZeroSchema = z.object({

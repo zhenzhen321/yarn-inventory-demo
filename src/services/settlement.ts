@@ -1,4 +1,5 @@
 import { Prisma, PrismaClient } from '@prisma/client'
+import { runIdempotent } from './idempotency'
 
 export type SettlementSide = 'PURCHASE' | 'SALE'
 export type SettlementStatus = 'UNPAID' | 'PARTIAL' | 'PAID'
@@ -22,8 +23,10 @@ export function settlementStatus(
   return 'UNPAID'
 }
 
-export async function createSettlement(db: PrismaClient, input: SettlementInput) {
-  return db.$transaction(async (tx) => {
+async function createSettlementInTransaction(
+  tx: Prisma.TransactionClient,
+  input: SettlementInput,
+) {
     const cp = await tx.counterparty.findUnique({ where: { id: input.counterpartyId } })
     if (!cp) throw new Error('往来单位不存在')
     const total =
@@ -57,7 +60,29 @@ export async function createSettlement(db: PrismaClient, input: SettlementInput)
       },
       include: { counterparty: true },
     })
-  })
+}
+
+export function createSettlement(db: PrismaClient, input: SettlementInput) {
+  return db.$transaction((tx) => createSettlementInTransaction(tx, input))
+}
+
+export function createSettlementIdempotent(
+  db: PrismaClient,
+  input: SettlementInput,
+  idempotencyKey?: string,
+) {
+  return runIdempotent(
+    db,
+    'SETTLEMENT_CREATE',
+    idempotencyKey,
+    input,
+    (tx) => createSettlementInTransaction(tx, input),
+    (tx, resourceId) =>
+      tx.settlement.findUniqueOrThrow({
+        where: { id: resourceId },
+        include: { counterparty: true },
+      }),
+  )
 }
 
 export interface CounterpartySummary {

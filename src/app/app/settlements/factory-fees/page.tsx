@@ -6,6 +6,7 @@ import { RevertButton } from '@/components/common/RevertButton'
 import { SettlementPageHeader } from '@/components/settlements/SettlementPageHeader'
 import { getFactoryFeePayments, getFactoryFeeSummary } from '@/services/factory-fee'
 import { STATUS_LABEL } from '@/services/settlement'
+import { formatBusinessDate } from '@/lib/business-date'
 
 export default async function FactoryFeeSettlementsPage() {
   const [fees, payments, user] = await Promise.all([
@@ -54,7 +55,7 @@ export default async function FactoryFeeSettlementsPage() {
           {payments.map((payment) => (
             <tr key={payment.id}>
               <td>{payment.factoryName}</td>
-              <td>{payment.date.toISOString().slice(0, 10)}</td>
+              <td>{formatBusinessDate(payment.date)}</td>
               <td>{payment.amount.toString()}</td>
               <td>{payment.method ?? '-'}</td>
               <td>{payment.handlerName}</td>

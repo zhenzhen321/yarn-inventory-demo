@@ -1,4 +1,5 @@
 import { Prisma, PrismaClient } from '@prisma/client'
+import { businessDateFromInput } from '@/lib/business-date'
 
 export interface OrderRecordFilter {
   type?: 'ALL' | 'PURCHASE' | 'SALE'
@@ -55,8 +56,8 @@ export async function getOrderRecords(
   db: PrismaClient,
   filter: OrderRecordFilter,
 ): Promise<OrderRecord[]> {
-  const from = filter.from ? new Date(filter.from) : undefined
-  const to = filter.to ? new Date(filter.to) : undefined
+  const from = filter.from ? businessDateFromInput(filter.from) : undefined
+  const to = filter.to ? businessDateFromInput(filter.to) : undefined
   const dateFilter =
     from || to
       ? { date: { ...(from ? { gte: from } : {}), ...(to ? { lte: to } : {}) } }

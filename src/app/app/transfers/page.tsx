@@ -2,6 +2,7 @@ import Link from 'next/link'
 import { Prisma } from '@prisma/client'
 import { prisma } from '@/lib/prisma'
 import { Table } from '@/components/ui/Table'
+import { formatBusinessDate } from '@/lib/business-date'
 
 export default async function TransfersPage() {
   const [orders, returns] = await Promise.all([
@@ -44,7 +45,7 @@ export default async function TransfersPage() {
         {orders.map((o) => (
           <tr key={o.id}>
             <td>{o.orderNo}</td>
-            <td>{o.date.toISOString().slice(0, 10)}</td>
+            <td>{formatBusinessDate(o.date)}</td>
             <td>
               {o.fromWarehouse.name}
               {o.fromWarehouse.type === 'FACTORY' ? '（加工厂）' : ''}
@@ -90,7 +91,7 @@ export default async function TransfersPage() {
               return (
                 <tr key={it.id}>
                   <td>{o.orderNo}</td>
-                  <td>{o.date.toISOString().slice(0, 10)}</td>
+                  <td>{formatBusinessDate(o.date)}</td>
                   <td>{o.factory.name}</td>
                   <td>{o.warehouse.name}</td>
                   <td>

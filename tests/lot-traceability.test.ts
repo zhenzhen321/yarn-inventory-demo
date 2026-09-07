@@ -25,14 +25,14 @@ describe('内部批次与实际成本追溯', () => {
       date: new Date('2026-09-01'),
       supplierId: base.supplierId,
       warehouseId: base.warehouseA,
-      handlerName: 'admin',
+      handlerName: '刚',
       items: [{ variantId: base.variantId, batchNo: 'SUP-88', weight: 100, price: 20, packages: 5 }],
     })
     const second = await createPurchase(db, {
       date: new Date('2026-09-02'),
       supplierId: base.supplierId,
       warehouseId: base.warehouseA,
-      handlerName: 'admin',
+      handlerName: '刚',
       items: [{ variantId: base.variantId, batchNo: 'SUP-88', weight: 100, price: 25, packages: 4 }],
     })
 
@@ -45,7 +45,7 @@ describe('内部批次与实际成本追溯', () => {
       date: new Date('2026-09-03'),
       customerId: base.customerId,
       warehouseId: base.warehouseA,
-      handlerName: 'admin',
+      handlerName: '刚',
       items: [{ inventoryId: expensive.id, weight: 100, price: 30 }],
     })
     const allocation = await db.saleAllocation.findFirstOrThrow({
@@ -63,7 +63,7 @@ describe('内部批次与实际成本追溯', () => {
       date: new Date('2026-09-01'),
       supplierId: base.supplierId,
       warehouseId: base.warehouseA,
-      handlerName: 'admin',
+      handlerName: '刚',
       items: [{ variantId: base.variantId, batchNo: 'PKG-1', weight: 100, price: 20, packages: 10 }],
     })
     let row = (await getInventoryRows(db, { warehouseId: base.warehouseA }))[0]
@@ -72,7 +72,7 @@ describe('内部批次与实际成本追溯', () => {
         date: new Date('2026-09-02'),
         customerId: base.customerId,
         warehouseId: base.warehouseA,
-        handlerName: 'admin',
+        handlerName: '刚',
         items: [{ inventoryId: row.id, weight: 20, price: 25 }],
       }),
     ).rejects.toThrow('部分销售时必须填写本次件数')
@@ -81,7 +81,7 @@ describe('内部批次与实际成本追溯', () => {
       date: new Date('2026-09-02'),
       customerId: base.customerId,
       warehouseId: base.warehouseA,
-      handlerName: 'admin',
+      handlerName: '刚',
       items: [{ inventoryId: row.id, weight: 20, price: 25, packages: 2 }],
     })
     const updatedRow = await db.inventory.findUniqueOrThrow({ where: { id: row.id } })
@@ -90,7 +90,7 @@ describe('内部批次与实际成本追溯', () => {
       date: new Date('2026-09-03'),
       customerId: base.customerId,
       warehouseId: base.warehouseA,
-      handlerName: 'admin',
+      handlerName: '刚',
       items: [{ inventoryId: updatedRow.id, weight: 80, price: 25 }],
     })
     expect(finalSale.items[0].packages).toBe(8)
@@ -105,7 +105,7 @@ describe('供应商直送加工厂与加工欠款', () => {
       date: new Date('2026-09-01'),
       supplierId: base.supplierId,
       warehouseId: factory.id,
-      handlerName: 'admin',
+      handlerName: '刚',
       items: [{ variantId: base.variantId, batchNo: 'RAW-9', weight: 100, price: 20, packages: 10 }],
     })
     let raw = (await getInventoryRows(db, { warehouseId: factory.id }))[0]
@@ -115,7 +115,7 @@ describe('供应商直送加工厂与加工欠款', () => {
         date: new Date('2026-09-01'),
         customerId: base.customerId,
         warehouseId: factory.id,
-        handlerName: 'admin',
+        handlerName: '刚',
         items: [{ inventoryId: raw.id, weight: 100, price: 30, packages: 10 }],
       }),
     ).rejects.toThrow('未结算加工费')
@@ -126,7 +126,7 @@ describe('供应商直送加工厂与加工欠款', () => {
       outputPackages: 9,
       color: '蓝色',
       batchNo: 'VAT-9',
-      handlerName: 'admin',
+      handlerName: '刚',
     })
     expect(completed.job.weightDiff.toString()).toBe('10')
     expect(completed.outputLot.id).not.toBe(completed.inputLot.id)
@@ -142,7 +142,7 @@ describe('供应商直送加工厂与加工欠款', () => {
       date: new Date('2026-09-02'),
       customerId: base.customerId,
       warehouseId: factory.id,
-      handlerName: 'admin',
+      handlerName: '刚',
       items: [{ inventoryId: finished.id, weight: 90, price: 35 }],
     })
     expect(sale.items[0].packages).toBe(9)
@@ -156,7 +156,7 @@ describe('供应商直送加工厂与加工欠款', () => {
       date: new Date('2026-09-01'),
       supplierId: base.supplierId,
       warehouseId: factory.id,
-      handlerName: 'admin',
+      handlerName: '刚',
       freight: 20,
       items: [{ variantId: base.variantId, batchNo: 'RAW-10', weight: 100, price: 20, packages: 10 }],
     })
@@ -174,7 +174,7 @@ describe('供应商直送加工厂与加工欠款', () => {
       date: new Date('2026-09-02'),
       factoryId: factory.id,
       warehouseId: base.warehouseA,
-      handlerName: 'admin',
+      handlerName: '刚',
       freight: 30,
       items: [{
         inventoryId: finished.id,

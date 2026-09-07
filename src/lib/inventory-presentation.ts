@@ -114,3 +114,19 @@ export function getSaleInventoryChoices<T extends {
     },
   }
 }
+
+export function findScannedInventory<
+  T extends {
+    warehouseId: string
+    scanCode?: string | null
+    lotNo?: string | null
+  },
+>(rows: T[], warehouseId: string, code: string): T | null {
+  const normalized = code.trim().toUpperCase()
+  if (!normalized) return null
+  const matches = rows.filter(
+    (row) =>
+      row.scanCode?.toUpperCase() === normalized || row.lotNo?.toUpperCase() === normalized,
+  )
+  return matches.find((row) => row.warehouseId === warehouseId) ?? matches[0] ?? null
+}
