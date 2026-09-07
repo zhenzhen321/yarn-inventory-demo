@@ -2,6 +2,10 @@ FROM node:20-bookworm-slim AS build
 
 WORKDIR /app
 
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends openssl \
+    && rm -rf /var/lib/apt/lists/*
+
 ENV DATABASE_URL=file:/tmp/build.db \
     SESSION_SECRET=build-only-session-secret-at-least-32-characters \
     COOKIE_SECURE=false \
