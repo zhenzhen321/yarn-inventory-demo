@@ -3,7 +3,7 @@ import type { PrismaClient } from '@prisma/client'
 import { getTestDb, resetDb } from './helpers/db'
 import { createBase } from './helpers/base'
 import { createPurchase, createSale, getInventoryRows } from '@/services/inventory'
-import { getOrderRecords } from '@/services/orders'
+import { getOrderRecordCount, getOrderRecords } from '@/services/orders'
 
 let db: PrismaClient
 
@@ -49,6 +49,30 @@ describe('出入库记录查询', () => {
     const rows = await getOrderRecords(db, {})
     expect(rows).toHaveLength(3)
     expect(rows[0].orderType).toBe('SALE')
+  })
+
+  it('默认截断到最近 200 张，limit null 返回全部，计数不受截断影响', async () => {
+    const base = await seed()
+    for (let i = 0; i < 210; i++) {
+      await createPurchase(db, {
+        date: new Date(2026, 7, 1 + (i % 28)),
+        supplierId: base.supplierId,
+        warehouseId: base.warehouseA,
+        handlerName: '爸爸',
+        items: [{ variantId: base.variantId, batchNo: `LIMIT-${i}`, weight: 10, price: 5 }],
+      })
+    }
+    const total = await getOrderRecordCount(db, {})
+    expect(total).toBeGreaterThanOrEqual(210)
+
+    const capped = await getOrderRecords(db, {})
+    expect(capped).toHaveLength(200)
+
+    const all = await getOrderRecords(db, { limit: null })
+    expect(all.length).toBe(total)
+    expect(all.length).toBeGreaterThan(capped.length)
+
+    expect(await getOrderRecordCount(db, { type: 'SALE' })).toBe(1)
   })
 
   it('按类型筛选', async () => {

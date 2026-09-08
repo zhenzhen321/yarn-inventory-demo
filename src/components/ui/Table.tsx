@@ -1,6 +1,8 @@
 import { Children, Fragment, cloneElement, isValidElement, ReactElement, ReactNode } from 'react'
 import { formatNumber } from '@/lib/display'
 
+const NUMERIC_HEADER = /金额|总额|货款|已付|未付|应付|已收|未收|应收|余额|单价|成本|运费|重量/
+
 export function Table({ headers, children }: { headers: string[]; children: ReactNode }) {
   function decorate(nodes: ReactNode): ReactNode {
     return Children.map(nodes, (node) => {
@@ -12,7 +14,7 @@ export function Table({ headers, children }: { headers: string[]; children: Reac
         if (!isValidElement(cell) || cell.type !== 'td') return cell
         const td = cell as typeof element
         const spanning = (td.props.colSpan ?? 1) > 1
-        const numeric = !spanning && /金额|总额|货款|已付|未付|应付|已收|未收|应收|余额|单价|成本|运费|重量/.test(headers[index] ?? '')
+        const numeric = !spanning && NUMERIC_HEADER.test(headers[index] ?? '')
         const value = td.props.children
         const formatted = numeric && (typeof value === 'number' || (typeof value === 'string' && /^-?\d+(\.\d+)?$/.test(value)))
           ? formatNumber(value) : value

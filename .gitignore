@@ -17,3 +17,5 @@ prisma/schema.test.prisma
 .prod-*.log
 *.log
 .DS_Store
+.next-e2e/
+.next-dev/

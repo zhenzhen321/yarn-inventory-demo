@@ -4,6 +4,7 @@ import { businessDateToday, formatBusinessDate } from '@/lib/business-date'
 import { buildInventoryGroups } from '@/lib/inventory-presentation'
 import { getInventoryRows } from '@/services/inventory'
 import { Table } from '@/components/ui/Table'
+import { Pager } from '@/components/ui/Pager'
 import { InventoryFilter } from '@/components/inventory/InventoryFilter'
 import { CurrentInventoryLabelButton } from '@/components/labels/CurrentInventoryLabelButton'
 import {
@@ -20,10 +21,12 @@ function sourceLabel(sourceType: string) {
 const inventoryGridColumns =
   'grid-cols-[minmax(180px,1.6fr)_100px_minmax(100px,1fr)_minmax(110px,1fr)_minmax(90px,1fr)_80px_110px_80px_minmax(140px,1fr)]'
 
+const GROUP_PAGE_SIZE = 20
+
 export default async function InventoryPage({
   searchParams,
 }: {
-  searchParams: Promise<{ warehouseId?: string; q?: string; includeZero?: string }>
+  searchParams: Promise<{ warehouseId?: string; q?: string; includeZero?: string; page?: string }>
 }) {
   const filters = await searchParams
   const warehouses = await prisma.warehouse.findMany({
@@ -73,6 +76,21 @@ export default async function InventoryPage({
     }
   })
   const groups = buildInventoryGroups(presentationRows)
+  const totalPages = Math.max(1, Math.ceil(groups.length / GROUP_PAGE_SIZE))
+  const groupPage = Math.min(Math.max(1, Number.parseInt(filters.page ?? '1', 10) || 1), totalPages)
+  const visibleGroups = groups.slice(
+    (groupPage - 1) * GROUP_PAGE_SIZE,
+    groupPage * GROUP_PAGE_SIZE,
+  )
+  const pagerHref = (p: number) => {
+    const params = new URLSearchParams()
+    if (filters.warehouseId) params.set('warehouseId', filters.warehouseId)
+    if (filters.q) params.set('q', filters.q)
+    if (filters.includeZero === '1') params.set('includeZero', '1')
+    if (p > 1) params.set('page', String(p))
+    const query = params.toString()
+    return '/app/inventory' + (query ? `?${query}` : '')
+  }
   const factoryRows: FactoryInventoryRow[] = rows
     .filter((row) => row.warehouse.type === 'FACTORY')
     .map((row) => ({
@@ -123,7 +141,7 @@ export default async function InventoryPage({
             <span>件数</span>
             <span>含运费单价</span>
           </div>
-          {groups.map((group) => {
+          {visibleGroups.map((group) => {
             const totalUnit =
               group.weight > 0
                 ? ((group.cost + group.freight) / group.weight).toFixed(2)
@@ -212,6 +230,18 @@ export default async function InventoryPage({
           })}
         </div>
       </div>
+      <Pager
+        page={groupPage}
+        totalPages={totalPages}
+        label="库存分组翻页"
+        buildHref={pagerHref}
+        basePath="/app/inventory"
+        params={{
+          warehouseId: filters.warehouseId,
+          q: filters.q,
+          includeZero: filters.includeZero === '1' ? '1' : undefined,
+        }}
+      />
     </div>
   )
 }

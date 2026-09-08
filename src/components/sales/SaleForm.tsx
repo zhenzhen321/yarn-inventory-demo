@@ -1,6 +1,6 @@
 'use client'
 
-import { FormEvent, useMemo, useState } from 'react'
+import { FormEvent, useMemo, useRef, useState } from 'react'
 import { useRouter } from 'next/navigation'
 import { ChoiceField } from '@/components/ui/ChoiceField'
 import { BusinessDateField } from '@/components/ui/BusinessDateField'
@@ -73,6 +73,7 @@ export function SaleForm({
   const [savedOrderNo, setSavedOrderNo] = useState('')
   const [scanCode, setScanCode] = useState('')
   const [scanMessage, setScanMessage] = useState('')
+  const scanInputRef = useRef<HTMLInputElement>(null)
 
   const warehouseType = warehouses.find((w) => w.id === warehouseId)?.type ?? 'WAREHOUSE'
   const available = useMemo(
@@ -116,25 +117,39 @@ export function SaleForm({
     )
   }
 
-  function addScannedLot() {
-    const code = scanCode.trim()
+  function addScannedLot(rawCode?: string) {
+    const code = (rawCode ?? scanCode).trim()
     if (!code) return
+    setScanCode('')
     const matched = findScannedInventory(inventoryRows, warehouseId, code)
     if (!matched) {
       setScanMessage('未找到该批次，请确认标签或改用手工选择')
       return
     }
-    if (!available.some((row) => row.id === matched.id)) {
-      setScanMessage(
-        matched.warehouseId !== warehouseId
-          ? `该批次当前在 ${matched.warehouseName}，不在所选仓库`
-          : '该加工厂批次尚未完成加工核算，不能销售',
+    const targetWarehouseType =
+      warehouses.find((w) => w.id === matched.warehouseId)?.type ?? 'WAREHOUSE'
+    if (matched.warehouseId !== warehouseId) {
+      if (rows.some((row) => row.inventoryId)) {
+        setScanMessage(
+          `该批次在 ${matched.warehouseName}；本单已有所选仓库的货，一张出库单只能对应一个仓库，请先保存或删清明细再扫`,
+        )
+        return
+      }
+      setWarehouseId(matched.warehouseId)
+    }
+    if (
+      !inventoryRows.some(
+        (row) =>
+          row.warehouseId === matched.warehouseId &&
+          (targetWarehouseType !== 'FACTORY' || row.processingFeeSettled) &&
+          row.id === matched.id,
       )
+    ) {
+      setScanMessage('该加工厂批次尚未完成加工核算，不能销售')
       return
     }
     if (rows.some((row) => row.inventoryId === matched.id)) {
       setScanMessage('该批次已在本单中，无需重复扫描')
-      setScanCode('')
       return
     }
     markDirty()
@@ -161,8 +176,25 @@ export function SaleForm({
     })
     setScanCode('')
     setScanMessage(
-      `已加入 ${matched.yarnName} · ${matched.lotNo ?? matched.batchNo}，默认全部 ${Number(matched.weight).toFixed(2)} kg`,
+      matched.warehouseId !== warehouseId
+        ? `已切换到 ${matched.warehouseName}，加入 ${matched.yarnName} · ${matched.lotNo ?? matched.batchNo}，默认全部 ${Number(matched.weight).toFixed(2)} kg`
+        : `已加入 ${matched.yarnName} · ${matched.lotNo ?? matched.batchNo}，默认全部 ${Number(matched.weight).toFixed(2)} kg`,
     )
+    scanInputRef.current?.focus()
+  }
+
+  function handleScanChange(value: string) {
+    setScanCode(value)
+    // 扫码枪通常整段注入且不带回车：内容一旦完整命中某个批次码就立即加入，无需点击
+    const normalized = value.trim().toUpperCase()
+    if (
+      normalized.length >= 6 &&
+      inventoryRows.some(
+        (row) => row.scanCode?.toUpperCase() === normalized || row.lotNo?.toUpperCase() === normalized,
+      )
+    ) {
+      addScannedLot(value)
+    }
   }
 
   async function onSubmit(e: FormEvent<HTMLFormElement>) {
@@ -231,27 +263,29 @@ export function SaleForm({
           扫码枪快速出库
           <div className="mt-1 flex gap-2">
             <Input
+              ref={scanInputRef}
               autoFocus
               value={scanCode}
-              onChange={(event) => setScanCode(event.target.value)}
+              onChange={(event) => handleScanChange(event.target.value)}
               onKeyDown={(event) => {
                 if (event.key === 'Enter') {
                   event.preventDefault()
                   addScannedLot()
                 }
               }}
-              placeholder="扫描标签二维码后按回车"
+              placeholder="扫描标签二维码或输入内部批次号"
               autoComplete="off"
             />
-            <Button type="button" onClick={addScannedLot}>
+            <Button type="button" onClick={() => addScannedLot()}>
               加入
             </Button>
           </div>
         </label>
         <p className="mt-1 text-xs text-blue-800">
-          扫码默认卖出该批全部余量和件数；部分卖出时，直接修改下方重量和件数。
+          扫入完整批次码后自动加入本单，批次在其他仓库时自动切换仓库（本单已有明细时除外）；
+          默认卖出全部余量和件数，部分卖出时直接修改下方重量和件数。
         </p>
-        {scanMessage && <Notice tone={scanMessage.startsWith("已加入") ? "success" : "info"}>{scanMessage}</Notice>}
+        {scanMessage && <Notice tone={scanMessage.startsWith("已加入") || scanMessage.startsWith("已切换到") ? "success" : "info"}>{scanMessage}</Notice>}
       </div>
 
       {rows.map((row, idx) => (

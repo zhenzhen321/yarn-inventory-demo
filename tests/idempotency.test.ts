@@ -74,4 +74,42 @@ describe('业务写入幂等控制', () => {
     expect(await db.inventory.count()).toBe(1)
     expect(await db.stockMovement.count()).toBe(1)
   })
+
+  it('新业务成功后清理超过 90 天的幂等记录，且不影响未过期记录', async () => {
+    const base = await createBase(db)
+    const input = {
+      date: new Date('2026-09-06'),
+      supplierId: base.supplierId,
+      warehouseId: base.warehouseA,
+      handlerName: '刚',
+      items: [{ variantId: base.variantId, batchNo: 'IDEM-CLEANUP', weight: 50, price: 10 }],
+    }
+    await db.idempotencyRequest.create({
+      data: {
+        operation: 'PURCHASE_CREATE',
+        key: 'idem-expired',
+        requestHash: 'old-hash',
+        resourceId: 'res-old',
+        completedAt: new Date(Date.now() - 91 * 24 * 60 * 60 * 1000),
+        createdAt: new Date(Date.now() - 91 * 24 * 60 * 60 * 1000),
+      },
+    })
+    await db.idempotencyRequest.create({
+      data: {
+        operation: 'PURCHASE_CREATE',
+        key: 'idem-recent',
+        requestHash: 'recent-hash',
+        resourceId: 'res-recent',
+        completedAt: new Date(),
+      },
+    })
+
+    const result = await createPurchaseIdempotent(db, input, 'idem-cleanup-trigger')
+
+    expect(result.replayed).toBe(false)
+    const keys = (await db.idempotencyRequest.findMany()).map((row) => row.key)
+    expect(keys).toContain('idem-cleanup-trigger')
+    expect(keys).toContain('idem-recent')
+    expect(keys).not.toContain('idem-expired')
+  })
 })

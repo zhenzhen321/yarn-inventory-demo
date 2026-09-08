@@ -95,46 +95,47 @@ export interface CounterpartySummary {
 }
 
 async function buildSummary(db: PrismaClient, side: SettlementSide): Promise<CounterpartySummary[]> {
-  const orders =
+  const orderGroups: { id: string; totalAmount: Prisma.Decimal | null }[] =
     side === 'PURCHASE'
-      ? await db.purchaseOrder.findMany({ where: { reversedAt: null }, include: { supplier: true } })
-      : await db.saleOrder.findMany({ where: { reversedAt: null }, include: { customer: true } })
-  const settledRows = await db.settlement.findMany({
+      ? (await db.purchaseOrder.groupBy({
+          by: ['supplierId'],
+          where: { reversedAt: null },
+          _sum: { totalAmount: true },
+        })).map((g) => ({ id: g.supplierId, totalAmount: g._sum.totalAmount }))
+      : (await db.saleOrder.groupBy({
+          by: ['customerId'],
+          where: { reversedAt: null },
+          _sum: { totalAmount: true },
+        })).map((g) => ({ id: g.customerId, totalAmount: g._sum.totalAmount }))
+  const settledGroups = await db.settlement.groupBy({
+    by: ['counterpartyId'],
     where: { side },
-    select: { counterpartyId: true, amount: true },
+    _sum: { amount: true },
   })
+  const totalByCp = new Map<string, Prisma.Decimal>()
+  for (const g of orderGroups) {
+    totalByCp.set(g.id, g.totalAmount ?? new Prisma.Decimal(0))
+  }
   const settledMap = new Map<string, Prisma.Decimal>()
-  for (const s of settledRows) {
-    settledMap.set(
-      s.counterpartyId,
-      (settledMap.get(s.counterpartyId) ?? new Prisma.Decimal(0)).plus(s.amount),
-    )
+  for (const g of settledGroups) {
+    settledMap.set(g.counterpartyId, g._sum.amount ?? new Prisma.Decimal(0))
   }
-  const map = new Map<string, CounterpartySummary>()
-  for (const o of orders) {
-    const cp =
-      side === 'PURCHASE'
-        ? (o as { supplier: { id: string; name: string } }).supplier
-        : (o as { customer: { id: string; name: string } }).customer
-    const cur =
-      map.get(cp.id) ??
-      ({
-        id: cp.id,
-        name: cp.name,
-        totalAmount: new Prisma.Decimal(0),
-        settledAmount: new Prisma.Decimal(0),
-        remainingAmount: new Prisma.Decimal(0),
-        status: 'UNPAID' as SettlementStatus,
-      } as CounterpartySummary)
-    cur.totalAmount = cur.totalAmount.plus(o.totalAmount)
-    map.set(cp.id, cur)
-  }
+  const ids = [...totalByCp.keys()]
+  const counterparties = ids.length
+    ? await db.counterparty.findMany({ where: { id: { in: ids } }, select: { id: true, name: true } })
+    : []
+  const nameById = new Map(counterparties.map((cp) => [cp.id, cp.name]))
   const rows: CounterpartySummary[] = []
-  for (const cur of map.values()) {
-    cur.settledAmount = settledMap.get(cur.id) ?? new Prisma.Decimal(0)
-    cur.remainingAmount = cur.totalAmount.minus(cur.settledAmount).toDecimalPlaces(2)
-    cur.status = settlementStatus(cur.settledAmount, cur.totalAmount)
-    rows.push(cur)
+  for (const [id, totalAmount] of totalByCp) {
+    const settledAmount = settledMap.get(id) ?? new Prisma.Decimal(0)
+    rows.push({
+      id,
+      name: nameById.get(id) ?? '',
+      totalAmount,
+      settledAmount,
+      remainingAmount: totalAmount.minus(settledAmount).toDecimalPlaces(2),
+      status: settlementStatus(settledAmount, totalAmount),
+    })
   }
   return rows.sort((a, b) => Number(b.remainingAmount) - Number(a.remainingAmount))
 }

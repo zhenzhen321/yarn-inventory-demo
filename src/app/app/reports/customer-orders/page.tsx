@@ -2,23 +2,35 @@ import { prisma } from '@/lib/prisma'
 import { OrderQueryPanel } from '@/components/reports/OrderQueryPanel'
 import { ReportPageHeader } from '@/components/reports/ReportPageHeader'
 import { ReportOrderTable } from '@/components/reports/ReportOrderTable'
+import { Pager } from '@/components/ui/Pager'
 import { getCustomerOrders } from '@/services/reports'
 import { formatBusinessDate } from '@/lib/business-date'
+
+const PAGE_SIZE = 20
 
 export default async function CustomerOrdersReportPage({
   searchParams,
 }: {
-  searchParams: Promise<{ customerId?: string }>
+  searchParams: Promise<{ customerId?: string; page?: string }>
 }) {
   const filters = await searchParams
   const customerId = filters.customerId ?? ''
-  const [customers, orders] = await Promise.all([
+  const page = Math.max(1, Number.parseInt(filters.page ?? '1', 10) || 1)
+  const where = { customerId, reversedAt: null }
+  const [customers, total, orders] = await Promise.all([
     prisma.counterparty.findMany({
       where: { active: true, type: { in: ['CUSTOMER', 'BOTH'] } },
       orderBy: { name: 'asc' },
     }),
-    getCustomerOrders(prisma, customerId),
+    customerId ? prisma.saleOrder.count({ where }) : Promise.resolve(0),
+    customerId
+      ? getCustomerOrders(prisma, customerId, {
+          skip: (page - 1) * PAGE_SIZE,
+          take: PAGE_SIZE,
+        })
+      : Promise.resolve([]),
   ])
+  const totalPages = Math.max(1, Math.ceil(total / PAGE_SIZE))
   const exportHref = customerId
     ? '/api/export?section=customer-orders&customerId=' + encodeURIComponent(customerId)
     : undefined
@@ -57,6 +69,18 @@ export default async function CustomerOrdersReportPage({
           })),
         }))}
       />
+      {customerId && (
+        <Pager
+          page={page}
+          totalPages={totalPages}
+          label="客户订单翻页"
+          buildHref={(p) =>
+            `/app/reports/customer-orders?customerId=${encodeURIComponent(customerId)}&page=${p}`
+          }
+          basePath="/app/reports/customer-orders"
+          params={{ customerId }}
+        />
+      )}
     </div>
   )
 }

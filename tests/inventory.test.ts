@@ -113,6 +113,38 @@ describe('买入入库', () => {
     expect(f2?.freight.toString()).toBe('40')
   })
 
+  it('多明细（跨变体）买入单批量校验并二次修改运费，分摊仍精确', async () => {
+    const base = await createBase()
+    const variant2 = await db.yarnVariant.create({
+      data: { yarnId: base.yarnId, spec: '40支', color: '黑色', unit: 'kg' },
+    })
+    const created = await createPurchase(db, {
+      date: new Date('2026-08-01'),
+      supplierId: base.supplierId,
+      warehouseId: base.warehouseA,
+      handlerName: '爸爸',
+      items: [
+        { variantId: base.variantId, batchNo: 'M1', weight: 300, price: 10 },
+        { variantId: variant2.id, batchNo: 'M2', weight: 200, price: 10 },
+        { variantId: variant2.id, batchNo: 'M3', weight: 100, price: 10 },
+      ],
+    })
+    await updatePurchaseFreight(db, created.id, 60)
+    const rowsAfterFirst = await getInventoryRows(db, { warehouseId: base.warehouseA })
+    const byBatch = (no: string) => rowsAfterFirst.find((r) => r.batch.batchNo === no)!
+    expect(byBatch('M1').freight.toString()).toBe('30')
+    expect(byBatch('M2').freight.toString()).toBe('20')
+    expect(byBatch('M3').freight.toString()).toBe('10')
+    await updatePurchaseFreight(db, created.id, 120)
+    const rowsAfterSecond = await getInventoryRows(db, { warehouseId: base.warehouseA })
+    const byBatch2 = (no: string) => rowsAfterSecond.find((r) => r.batch.batchNo === no)!
+    expect(byBatch2('M1').freight.toString()).toBe('60')
+    expect(byBatch2('M2').freight.toString()).toBe('40')
+    expect(byBatch2('M3').freight.toString()).toBe('20')
+    const updated = await db.purchaseOrder.findUniqueOrThrow({ where: { id: created.id } })
+    expect(updated.freight.toString()).toBe('120')
+  })
+
   it('买入保存时库存、内部批次和入库流水的运费合计精确等于订单运费', async () => {
     const base = await createBase()
     const created = await createPurchase(db, {

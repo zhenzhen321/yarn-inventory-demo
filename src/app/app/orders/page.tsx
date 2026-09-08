@@ -4,7 +4,7 @@ import { OrderFilterPanel } from '@/components/orders/OrderFilterPanel'
 import { OrderTable } from '@/components/orders/OrderTable'
 import { PrintButton } from '@/components/orders/PrintButton'
 import { ExportLink } from '@/components/reports/ExportLink'
-import { getOrderRecords } from '@/services/orders'
+import { getOrderRecordCount, getOrderRecords } from '@/services/orders'
 import { formatBusinessDate } from '@/lib/business-date'
 
 export default async function OrdersPage({
@@ -22,10 +22,19 @@ export default async function OrdersPage({
   }>
 }) {
   const filters = await searchParams
-  const [warehouses, counterparties, rows, user] = await Promise.all([
+  const [warehouses, counterparties, rows, total, user] = await Promise.all([
     prisma.warehouse.findMany({ orderBy: { name: 'asc' } }),
     prisma.counterparty.findMany({ orderBy: { name: 'asc' } }),
     getOrderRecords(prisma, {
+      type: (filters.type as 'ALL' | 'PURCHASE' | 'SALE') ?? 'ALL',
+      from: filters.from,
+      to: filters.to,
+      warehouseId: filters.warehouseId,
+      counterpartyId: filters.counterpartyId,
+      q: filters.q,
+      yarnQ: filters.yarnQ,
+    }),
+    getOrderRecordCount(prisma, {
       type: (filters.type as 'ALL' | 'PURCHASE' | 'SALE') ?? 'ALL',
       from: filters.from,
       to: filters.to,
@@ -57,7 +66,9 @@ export default async function OrdersPage({
         </div>
       </div>
       <OrderFilterPanel warehouses={warehouses} counterparties={counterparties} />
-      <p className="text-sm text-gray-600">共 {rows.length} 条记录</p>
+      <p className="text-sm text-gray-600">
+        共 {total} 张单{rows.length < total ? `，当前显示最近 ${rows.length} 张，更早的请用日期等筛选缩小范围` : ''}
+      </p>
       <OrderTable
         currentUserName={user?.name}
         initialExpandedOrderNo={filters.focus}

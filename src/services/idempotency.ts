@@ -33,6 +33,19 @@ export function idempotencyKeyFromRequest(request: Request): string | undefined 
   return key
 }
 
+const IDEMPOTENCY_RETENTION_MS = 90 * 24 * 60 * 60 * 1000
+
+/** 删除超过保留期（90 天）的幂等记录，防止表无限增长；失败不影响业务。 */
+export async function cleanupIdempotencyRequests(db: PrismaClient): Promise<void> {
+  try {
+    await db.idempotencyRequest.deleteMany({
+      where: { createdAt: { lt: new Date(Date.now() - IDEMPOTENCY_RETENTION_MS) } },
+    })
+  } catch {
+    // 清理失败可忽略，下次提交会再尝试
+  }
+}
+
 export async function runIdempotent<T extends { id: string }>(
   db: PrismaClient,
   operation: string,
@@ -66,7 +79,7 @@ export async function runIdempotent<T extends { id: string }>(
   if (existing) return existing
 
   try {
-    return await db.$transaction(
+    const result = await db.$transaction(
       async (tx) => {
         const seen = await tx.idempotencyRequest.findUnique({
           where: { operation_key: { operation, key } },
@@ -91,6 +104,8 @@ export async function runIdempotent<T extends { id: string }>(
       },
       { maxWait: 10_000, timeout: 30_000 },
     )
+    if (!result.replayed) await cleanupIdempotencyRequests(db)
+    return result
   } catch (error) {
     const isConcurrencyConflict =
       error instanceof Prisma.PrismaClientKnownRequestError &&

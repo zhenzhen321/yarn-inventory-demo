@@ -7,7 +7,7 @@ import { businessDateToday, formatBusinessDate } from '@/lib/business-date'
 import { formatNumber } from '@/lib/display'
 
 export default async function DashboardPage() {
-  const [inventory, recent, valuation, stocktakes, warehouses] = await Promise.all([
+  const [inventory, recent, valuation, lastStocktakes, warehouses] = await Promise.all([
     prisma.inventory.findMany({
       where: { archived: false, weight: { gt: 0 } },
       include: { warehouse: true, variant: { include: { yarn: true } }, batch: true },
@@ -18,12 +18,15 @@ export default async function DashboardPage() {
       include: { supplier: true, warehouse: true },
     }),
     getInventoryValuation(prisma),
-    prisma.stocktake.findMany({ select: { warehouseId: true, date: true } }),
+    prisma.stocktake.groupBy({ by: ['warehouseId'], _max: { date: true } }),
     prisma.warehouse.findMany({ where: { active: true }, orderBy: { name: 'asc' } }),
   ])
+  const lastStocktakeByWarehouse = new Map(
+    lastStocktakes.map((row) => [row.warehouseId, row._max.date]),
+  )
   const totals = warehouses.map((warehouse) => {
     const rows = inventory.filter((row) => row.warehouseId === warehouse.id)
-    const last = stocktakes.filter((record) => record.warehouseId === warehouse.id).sort((a, b) => b.date.getTime() - a.date.getTime())[0]?.date
+    const last = lastStocktakeByWarehouse.get(warehouse.id) ?? null
     const days = last ? Math.floor((Date.parse(businessDateToday()) - Date.parse(formatBusinessDate(last))) / 86400000) : null
     return { ...warehouse, weight: rows.reduce((sum, row) => sum + Number(row.weight), 0),
       batches: new Set(rows.map((row) => row.lotId ?? row.batchId)).size,

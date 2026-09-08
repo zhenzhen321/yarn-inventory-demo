@@ -167,7 +167,7 @@ export async function GET(req: Request) {
       q: url.searchParams.get('q') ?? undefined,
       yarnQ: url.searchParams.get('yarnQ') ?? undefined,
     }
-    const orders = await getOrderRecords(prisma, filter)
+    const orders = await getOrderRecords(prisma, { ...filter, limit: null })
     const rows: Record<string, unknown>[] = []
     for (const o of orders) {
       for (const it of o.items) {

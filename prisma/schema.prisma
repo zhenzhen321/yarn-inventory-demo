@@ -111,6 +111,7 @@ model PurchaseOrder {
   items       PurchaseItem[]
 
   @@index([reversedAt, date])
+  @@index([supplierId])
 }
 
 model PurchaseItem {
@@ -127,6 +128,8 @@ model PurchaseItem {
   packages  Int?
   lotId     String?       @unique
   lot       InventoryLot? @relation("PurchaseItemLot", fields: [lotId], references: [id])
+
+  @@index([orderId])
 }
 
 model SaleOrder {
@@ -147,6 +150,7 @@ model SaleOrder {
   items       SaleItem[]
 
   @@index([reversedAt, date])
+  @@index([customerId])
 }
 
 model SaleItem {
@@ -162,6 +166,8 @@ model SaleItem {
   unitCost    Decimal          @default(0)
   unitFreight Decimal          @default(0)
   allocations SaleAllocation[]
+
+  @@index([orderId])
 }
 
 model TransferOrder {
@@ -189,6 +195,8 @@ model TransferItem {
   weight                 Decimal
   packages               Int?
   destinationInventoryId String?
+
+  @@index([orderId])
 }
 
 model Inventory {
@@ -218,6 +226,7 @@ model Inventory {
   processingInputs      ProcessingInput[]
 
   @@index([lotId, warehouseId, archived])
+  @@index([variantId, batchId])
 }
 
 model Stocktake {
@@ -241,6 +250,8 @@ model StocktakeItem {
   bookWeight   Decimal
   actualWeight Decimal
   diff         Decimal
+
+  @@index([stocktakeId])
 }
 
 model Settlement {
@@ -253,6 +264,8 @@ model Settlement {
   method         String?
   handlerName    String
   createdAt      DateTime     @default(now())
+
+  @@index([counterpartyId, date])
 }
 
 model AuditLog {
@@ -263,6 +276,8 @@ model AuditLog {
   target    String
   detail    String?
   createdAt DateTime @default(now())
+
+  @@index([createdAt])
 }
 
 model IdempotencyRequest {
@@ -311,6 +326,8 @@ model ProcessingReturnItem {
   newFreight             Decimal          @default(0)
   outputLotId            String?
   destinationInventoryId String?
+
+  @@index([orderId])
 }
 
 model ProcessingFeeSettlement {

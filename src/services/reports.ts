@@ -8,23 +8,22 @@ export interface WarehouseValuation {
 export async function getInventoryValuation(
   db: PrismaClient,
 ): Promise<WarehouseValuation[]> {
-  const inventory = await db.inventory.findMany({
-    where: { archived: false },
-    include: { warehouse: true },
-  })
-  const map = new Map<string, WarehouseValuation>()
-  for (const r of inventory) {
-    const cur =
-      map.get(r.warehouseId) ??
-      ({ name: r.warehouse.name, weight: 0, value: new Prisma.Decimal(0) } as WarehouseValuation)
-    cur.weight += Number(r.weight)
-    cur.value = cur.value.plus(r.cost)
-    map.set(r.warehouseId, cur)
-  }
-  return [...map.values()].map((w) => ({
-    ...w,
-    value: w.value.toDecimalPlaces(2),
-  }))
+  const [grouped, warehouses] = await Promise.all([
+    db.inventory.groupBy({
+      by: ['warehouseId'],
+      where: { archived: false },
+      _sum: { weight: true, cost: true },
+    }),
+    db.warehouse.findMany({ select: { id: true, name: true } }),
+  ])
+  const nameById = new Map(warehouses.map((w) => [w.id, w.name]))
+  return grouped
+    .filter((row) => nameById.has(row.warehouseId))
+    .map((row) => ({
+      name: nameById.get(row.warehouseId)!,
+      weight: Number(row._sum.weight ?? 0),
+      value: (row._sum.cost ?? new Prisma.Decimal(0)).toDecimalPlaces(2),
+    }))
 }
 
 export interface FlowRow {
@@ -95,20 +94,55 @@ export interface OrderQueryItemRow {
   packages: number | null
 }
 
+export interface OrderQueryOptions {
+  /** 分页偏移；不传时返回全部（导出用） */
+  skip?: number
+  /** 每页条数；不传时返回全部（导出用） */
+  take?: number
+}
+
 export async function getCustomerOrders(
   db: PrismaClient,
   customerId: string,
+  options: OrderQueryOptions = {},
 ): Promise<OrderQueryRow[]> {
   const orders = await db.saleOrder.findMany({
     where: { customerId, reversedAt: null },
     orderBy: { date: 'desc' },
-    include: {
-      customer: true,
-      warehouse: true,
+    ...(options.skip !== undefined || options.take !== undefined
+      ? {
+          skip: options.skip,
+          take: options.take,
+        }
+      : {}),
+    select: {
+      id: true,
+      orderNo: true,
+      date: true,
+      warehouse: { select: { name: true } },
+      handlerName: true,
+      customer: { select: { name: true } },
+      totalAmount: true,
+      freight: true,
+      note: true,
       items: {
-        include: {
+        select: {
+          weight: true,
+          price: true,
+          amount: true,
+          packages: true,
           inventory: {
-            include: { variant: { include: { yarn: true } }, batch: true },
+            select: {
+              variant: {
+                select: {
+                  spec: true,
+                  color: true,
+                  unit: true,
+                  yarn: { select: { name: true } },
+                },
+              },
+              batch: { select: { batchNo: true } },
+            },
           },
         },
       },
@@ -141,14 +175,44 @@ export async function getCustomerOrders(
 export async function getSupplierOrders(
   db: PrismaClient,
   supplierId: string,
+  options: OrderQueryOptions = {},
 ): Promise<OrderQueryRow[]> {
   const orders = await db.purchaseOrder.findMany({
     where: { supplierId, reversedAt: null },
     orderBy: { date: 'desc' },
-    include: {
-      supplier: true,
-      warehouse: true,
-      items: { include: { variant: { include: { yarn: true } }, batch: true } },
+    ...(options.skip !== undefined || options.take !== undefined
+      ? {
+          skip: options.skip,
+          take: options.take,
+        }
+      : {}),
+    select: {
+      id: true,
+      orderNo: true,
+      date: true,
+      warehouse: { select: { name: true } },
+      handlerName: true,
+      supplier: { select: { name: true } },
+      totalAmount: true,
+      freight: true,
+      note: true,
+      items: {
+        select: {
+          weight: true,
+          price: true,
+          amount: true,
+          packages: true,
+          variant: {
+            select: {
+              spec: true,
+              color: true,
+              unit: true,
+              yarn: { select: { name: true } },
+            },
+          },
+          batch: { select: { batchNo: true } },
+        },
+      },
     },
   })
   return orders.map((o) => ({
@@ -184,29 +248,33 @@ export interface ProfitEstimate {
 }
 
 export async function getProfitEstimate(db: PrismaClient): Promise<ProfitEstimate> {
-  const saleOrders = await db.saleOrder.findMany({ where: { reversedAt: null } })
-  const orderIds = saleOrders.map((order) => order.id)
-  const [saleItems, saleMovements] = await Promise.all([
-    db.saleItem.findMany({ where: { orderId: { in: orderIds } } }),
+  const [orderTotals, saleOrders, saleItems, saleMovements] = await Promise.all([
+    db.saleOrder.aggregate({
+      where: { reversedAt: null },
+      _sum: { totalAmount: true, freight: true },
+    }),
+    db.saleOrder.findMany({ where: { reversedAt: null }, select: { id: true } }),
+    db.saleItem.findMany({
+      where: { order: { reversedAt: null } },
+      select: { id: true, weight: true, unitCost: true, unitFreight: true },
+    }),
     db.stockMovement.findMany({
-      where: { type: 'SALE', referenceType: 'SALE', referenceId: { in: orderIds } },
+      where: { type: 'SALE', referenceType: 'SALE' },
+      select: { referenceId: true, referenceItemId: true, goodsCost: true, freightCost: true },
     }),
   ])
-  const movementByItem = new Map<string, (typeof saleMovements)[number][]>()
+  const orderIds = new Set(saleOrders.map((order) => order.id))
+  const movementByItem = new Map<string, { goodsCost: Prisma.Decimal; freightCost: Prisma.Decimal }[]>()
   for (const movement of saleMovements) {
-    if (!movement.referenceItemId) continue
+    if (!movement.referenceItemId || !orderIds.has(movement.referenceId)) continue
     const rows = movementByItem.get(movement.referenceItemId) ?? []
     rows.push(movement)
     movementByItem.set(movement.referenceItemId, rows)
   }
-  let saleGoodsTotal = new Prisma.Decimal(0)
-  let saleFreightTotal = new Prisma.Decimal(0)
+  let saleGoodsTotal = orderTotals._sum.totalAmount ?? new Prisma.Decimal(0)
+  let saleFreightTotal = orderTotals._sum.freight ?? new Prisma.Decimal(0)
   let estimatedCost = new Prisma.Decimal(0)
   let estimatedFreight = new Prisma.Decimal(0)
-  for (const o of saleOrders) {
-    saleGoodsTotal = saleGoodsTotal.plus(o.totalAmount)
-    saleFreightTotal = saleFreightTotal.plus(o.freight)
-  }
   for (const it of saleItems) {
     const movements = movementByItem.get(it.id)
     if (movements?.length) {

@@ -9,6 +9,8 @@ export interface OrderRecordFilter {
   counterpartyId?: string
   q?: string
   yarnQ?: string
+  /** 最多返回的订单数；null 表示不限（导出用）。默认 200。 */
+  limit?: number | null
 }
 
 export interface OrderItemRecord {
@@ -56,6 +58,8 @@ export async function getOrderRecords(
   db: PrismaClient,
   filter: OrderRecordFilter,
 ): Promise<OrderRecord[]> {
+  const limit = filter.limit === null ? null : (filter.limit ?? 200)
+  const take = limit === null ? undefined : limit
   const from = filter.from ? businessDateFromInput(filter.from) : undefined
   const to = filter.to ? businessDateFromInput(filter.to) : undefined
   const dateFilter =
@@ -85,6 +89,7 @@ export async function getOrderRecords(
             items: { include: { variant: { include: { yarn: true } }, batch: true, lot: true } },
           },
           orderBy: { date: 'desc' },
+          take,
         }),
     filter.type === 'PURCHASE'
       ? Promise.resolve([])
@@ -109,9 +114,9 @@ export async function getOrderRecords(
             },
           },
           orderBy: { date: 'desc' },
+          take,
         }),
   ])
-
   const rows: OrderRecord[] = []
   for (const o of purchases) {
     rows.push({
@@ -177,5 +182,44 @@ export async function getOrderRecords(
     })
   }
   rows.sort((a, b) => b.date.getTime() - a.date.getTime())
-  return rows
+  return limit === null ? rows : rows.slice(0, limit)
+}
+
+/** 统计符合筛选的订单总数，供列表页显示"共 X 张单"。 */
+export async function getOrderRecordCount(
+  db: PrismaClient,
+  filter: OrderRecordFilter,
+): Promise<number> {
+  const from = filter.from ? businessDateFromInput(filter.from) : undefined
+  const to = filter.to ? businessDateFromInput(filter.to) : undefined
+  const common = {
+    ...(from || to
+      ? { date: { ...(from ? { gte: from } : {}), ...(to ? { lte: to } : {}) } }
+      : {}),
+    ...(filter.warehouseId ? { warehouseId: filter.warehouseId } : {}),
+    ...(filter.q ? { orderNo: { contains: filter.q } } : {}),
+  }
+  const [purchases, sales] = await Promise.all([
+    filter.type === 'SALE'
+      ? Promise.resolve(0)
+      : db.purchaseOrder.count({
+          where: {
+            ...common,
+            ...(filter.counterpartyId ? { supplierId: filter.counterpartyId } : {}),
+            ...(filter.yarnQ ? { items: { some: { variant: yarnMatch(filter.yarnQ) } } } : {}),
+          },
+        }),
+    filter.type === 'PURCHASE'
+      ? Promise.resolve(0)
+      : db.saleOrder.count({
+          where: {
+            ...common,
+            ...(filter.counterpartyId ? { customerId: filter.counterpartyId } : {}),
+            ...(filter.yarnQ
+              ? { items: { some: { inventory: { variant: yarnMatch(filter.yarnQ) } } } }
+              : {}),
+          },
+        }),
+  ])
+  return purchases + sales
 }

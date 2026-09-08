@@ -76,9 +76,7 @@ export async function deleteYarnSafe(db: PrismaClient, id: string) {
       )
     }
   }
-  for (const v of yarn.variants) {
-    await db.batch.deleteMany({ where: { variantId: v.id } })
-  }
+  await db.batch.deleteMany({ where: { variant: { yarnId: id } } })
   await db.yarnVariant.deleteMany({ where: { yarnId: id } })
   return db.yarn.delete({ where: { id } })
 }

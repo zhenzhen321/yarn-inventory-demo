@@ -194,22 +194,31 @@ export async function updatePurchaseFreight(db: PrismaClient, id: string, freigh
     if (newFreight.lessThan(0)) throw new Error('运费不能为负')
 
     const exactItems = items.filter((item) => item.lotId)
+    const lotIds = [...new Set(exactItems.map((item) => item.lotId!))]
+    const [lotInventoryRows, laterMovementGroups] = await Promise.all([
+      lotIds.length
+        ? tx.inventory.findMany({
+            where: { lotId: { in: lotIds }, warehouseId: order.warehouseId, archived: false },
+          })
+        : Promise.resolve([]),
+      lotIds.length
+        ? tx.stockMovement.groupBy({
+            by: ['lotId'],
+            where: {
+              lotId: { in: lotIds },
+              NOT: { type: 'PURCHASE_RECEIPT', referenceId: order.id },
+            },
+            _count: { _all: true },
+          })
+        : Promise.resolve([]),
+    ])
+    const inventoryByLotId = new Map(lotInventoryRows.map((row) => [row.lotId!, row]))
+    const laterMovementsByLotId = new Map(
+      laterMovementGroups.map((group) => [group.lotId, group._count._all]),
+    )
     for (const item of exactItems) {
-      const [row, laterMovements] = await Promise.all([
-        tx.inventory.findFirst({
-          where: {
-            lotId: item.lotId!,
-            warehouseId: order.warehouseId,
-            archived: false,
-          },
-        }),
-        tx.stockMovement.count({
-          where: {
-            lotId: item.lotId!,
-            NOT: { type: 'PURCHASE_RECEIPT', referenceId: order.id },
-          },
-        }),
-      ])
+      const row = inventoryByLotId.get(item.lotId!)
+      const laterMovements = laterMovementsByLotId.get(item.lotId!) ?? 0
       if (!row || !row.weight.equals(item.weight) || laterMovements > 0) {
         throw new Error('该买入单库存已发生卖出、调拨、加工或盘点，不能再修改运费')
       }
@@ -217,24 +226,41 @@ export async function updatePurchaseFreight(db: PrismaClient, id: string, freigh
 
     const legacyItems = items.filter((item) => !item.lotId)
     const legacyKeys = new Set(legacyItems.map((item) => `${item.variantId}|${item.batchId}`))
-    for (const key of legacyKeys) {
+    const legacyPairs = [...legacyKeys].map((key) => {
       const [variantId, batchId] = key.split('|')
-      const [row, purchased] = await Promise.all([
-        tx.inventory.findFirst({
-          where: {
-            warehouseId: order.warehouseId,
-            variantId,
-            batchId,
-            processingFeeSettled: false,
-            archived: false,
-          },
-        }),
-        tx.purchaseItem.aggregate({
-          where: { variantId, batchId, order: { warehouseId: order.warehouseId } },
-          _sum: { weight: true },
-        }),
-      ])
-      const totalPurchased = purchased._sum.weight ?? new Prisma.Decimal(0)
+      return { variantId, batchId }
+    })
+    const [legacyInventoryRows, purchasedGroups] = await Promise.all([
+      legacyPairs.length
+        ? tx.inventory.findMany({
+            where: {
+              warehouseId: order.warehouseId,
+              OR: legacyPairs.map(({ variantId, batchId }) => ({ variantId, batchId })),
+              processingFeeSettled: false,
+              archived: false,
+            },
+          })
+        : Promise.resolve([]),
+      legacyPairs.length
+        ? tx.purchaseItem.groupBy({
+            by: ['variantId', 'batchId'],
+            where: {
+              OR: legacyPairs.map(({ variantId, batchId }) => ({ variantId, batchId })),
+              order: { warehouseId: order.warehouseId },
+            },
+            _sum: { weight: true },
+          })
+        : Promise.resolve([]),
+    ])
+    const legacyInventoryByKey = new Map(
+      legacyInventoryRows.map((row) => [`${row.variantId}|${row.batchId}`, row]),
+    )
+    const purchasedByKey = new Map(
+      purchasedGroups.map((group) => [`${group.variantId}|${group.batchId}`, group._sum.weight ?? new Prisma.Decimal(0)]),
+    )
+    for (const key of legacyKeys) {
+      const row = legacyInventoryByKey.get(key)
+      const totalPurchased = purchasedByKey.get(key) ?? new Prisma.Decimal(0)
       if (!row || !row.weight.equals(totalPurchased)) {
         throw new Error('该买入单库存已发生卖出、调拨或盘点，不能再修改运费')
       }
@@ -250,18 +276,8 @@ export async function updatePurchaseFreight(db: PrismaClient, id: string, freigh
       if (delta.isZero()) continue
       const it = items[i]
       const row = it.lotId
-        ? await tx.inventory.findFirst({
-            where: { lotId: it.lotId, warehouseId: order.warehouseId, archived: false },
-          })
-        : await tx.inventory.findFirst({
-            where: {
-              warehouseId: order.warehouseId,
-              variantId: it.variantId,
-              batchId: it.batchId,
-              processingFeeSettled: false,
-              archived: false,
-            },
-          })
+        ? inventoryByLotId.get(it.lotId)
+        : legacyInventoryByKey.get(`${it.variantId}|${it.batchId}`)
       if (!row) throw new Error(`库存记录不存在：变体 ${it.variantId} 批次 ${it.batchId}`)
       await tx.inventory.update({
         where: { id: row.id },

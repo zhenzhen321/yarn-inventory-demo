@@ -91,4 +91,23 @@ describe('独立批次二维码标签', () => {
     expect(saleSource).toContain('weight: matched.weight')
     expect(saleSource).toContain("packages: matched.packages?.toString() ?? ''")
   })
+
+  it('每次扫码尝试先清空输入，失败标签不会与下一张标签拼接', () => {
+    const scanHandler = saleSource.slice(
+      saleSource.indexOf('function addScannedLot('),
+      saleSource.indexOf('async function onSubmit'),
+    )
+    expect(scanHandler.indexOf("setScanCode('')")).toBeGreaterThan(-1)
+    expect(scanHandler.indexOf("setScanCode('')")).toBeLessThan(
+      scanHandler.indexOf('findScannedInventory(inventoryRows, warehouseId, code)'),
+    )
+  })
+
+  it('扫入完整批次码即自动加入，批次在其他仓库时自动切换仓库', () => {
+    expect(saleSource).toContain('function handleScanChange')
+    expect(saleSource).toContain('addScannedLot(value)')
+    expect(saleSource).toContain('setWarehouseId(matched.warehouseId)')
+    expect(saleSource).toContain('已切换到')
+    expect(saleSource).toContain('scanInputRef.current?.focus()')
+  })
 })
