@@ -2,6 +2,7 @@ import { NextResponse } from 'next/server'
 import { prisma } from '@/lib/prisma'
 import { getSessionUser } from '@/lib/auth'
 import { logAudit } from '@/lib/audit'
+import { invalidateMasterData } from '@/lib/master-data-cache'
 import { processingJobCompletionSchema } from '@/lib/validation'
 import { completeProcessingJobIdempotent } from '@/services/inventory'
 import { idempotencyKeyFromRequest } from '@/services/idempotency'
@@ -24,6 +25,7 @@ export async function POST(req: Request) {
       { ...parsed.data, handlerName: user.name },
       idempotencyKeyFromRequest(req),
     )
+    invalidateMasterData()
     const completed = result.value
     if (!result.replayed) {
       await logAudit({

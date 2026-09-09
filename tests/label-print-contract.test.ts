@@ -86,8 +86,10 @@ describe('独立批次二维码标签', () => {
 
   it('扫码枪销售按内部扫码码匹配，并默认整批重量和件数', () => {
     expect(saleSource).toContain('扫码枪快速出库')
+    expect(saleSource).toContain('aria-label="扫描标签二维码"')
+    expect(saleSource).toContain('扫描 YMS-二维码或输入 LOT-内部批次号')
     expect(saleSource).toContain("event.key === 'Enter'")
-    expect(saleSource).toContain('findScannedInventory(inventoryRows, warehouseId, code)')
+    expect(saleSource).toContain('/api/sale-inventory?warehouseId=')
     expect(saleSource).toContain('weight: matched.weight')
     expect(saleSource).toContain("packages: matched.packages?.toString() ?? ''")
   })
@@ -99,13 +101,16 @@ describe('独立批次二维码标签', () => {
     )
     expect(scanHandler.indexOf("setScanCode('')")).toBeGreaterThan(-1)
     expect(scanHandler.indexOf("setScanCode('')")).toBeLessThan(
-      scanHandler.indexOf('findScannedInventory(inventoryRows, warehouseId, code)'),
+      scanHandler.indexOf('fetch(`/api/sale-inventory?warehouseId='),
     )
   })
 
-  it('扫入完整批次码即自动加入，批次在其他仓库时自动切换仓库', () => {
+  it('扫码或粘贴内容先保留，按回车或点击加入后再处理', () => {
     expect(saleSource).toContain('function handleScanChange')
-    expect(saleSource).toContain('addScannedLot(value)')
+    expect(saleSource).toContain('setScanCode(value)')
+    expect(saleSource).not.toContain('addScannedLot(value)')
+    expect(saleSource).toContain("event.key === 'Enter'")
+    expect(saleSource).toContain('onClick={() => void addScannedLot()}')
     expect(saleSource).toContain('setWarehouseId(matched.warehouseId)')
     expect(saleSource).toContain('已切换到')
     expect(saleSource).toContain('scanInputRef.current?.focus()')

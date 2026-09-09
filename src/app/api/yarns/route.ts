@@ -3,6 +3,7 @@ import { prisma } from '@/lib/prisma'
 import { yarnSchema } from '@/lib/validation'
 import { getSessionUser } from '@/lib/auth'
 import { logAudit } from '@/lib/audit'
+import { invalidateMasterData } from '@/lib/master-data-cache'
 
 export async function GET(req: Request) {
   const url = new URL(req.url)
@@ -30,6 +31,7 @@ export async function POST(req: Request) {
   const parsed = yarnSchema.safeParse(body)
   if (!parsed.success) return NextResponse.json({ error: '参数不正确' }, { status: 400 })
   const row = await prisma.yarn.create({ data: parsed.data })
+  invalidateMasterData()
   await logAudit({
     userName: user?.name ?? '未知',
     action: 'YARN_CREATE',

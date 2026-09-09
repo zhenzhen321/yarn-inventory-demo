@@ -1,6 +1,6 @@
 'use client'
 
-import { FormEvent, useMemo, useRef, useState } from 'react'
+import { FormEvent, useEffect, useMemo, useRef, useState } from 'react'
 import { useRouter } from 'next/navigation'
 import { ChoiceField } from '@/components/ui/ChoiceField'
 import { BusinessDateField } from '@/components/ui/BusinessDateField'
@@ -15,7 +15,7 @@ import { OrderTraceLink } from '@/components/orders/OrderTraceLink'
 import { resolveNumeric } from '@/lib/expression'
 import { businessDateToday } from '@/lib/business-date'
 import { useIdempotentSubmit } from '@/hooks/useIdempotentSubmit'
-import { findScannedInventory, getSaleInventoryChoices } from '@/lib/inventory-presentation'
+import { getSaleInventoryChoices } from '@/lib/inventory-presentation'
 
 interface Option {
   id: string
@@ -56,34 +56,44 @@ export function SaleForm({
   customers,
   warehouses,
   inventoryRows,
+  initialWarehouseId,
   defaultHandler,
 }: {
   customers: Option[]
   warehouses: Option[]
   inventoryRows: InventoryRow[]
+  initialWarehouseId: string
   defaultHandler?: string
 }) {
   const router = useRouter()
   const { markDirty, markSaved, confirmDiscard } = useUnsavedChanges()
   const { submit, submitting } = useIdempotentSubmit()
   const [customerId, setCustomerId] = useState(customers[0]?.id ?? '')
-  const [warehouseId, setWarehouseId] = useState(warehouses[0]?.id ?? '')
+  const [warehouseId, setWarehouseId] = useState(initialWarehouseId)
+  const [loadedRows, setLoadedRows] = useState(inventoryRows)
+  const [inventoryLoading, setInventoryLoading] = useState(false)
+  const [inventoryError, setInventoryError] = useState('')
+  const [scanLoading, setScanLoading] = useState(false)
   const [rows, setRows] = useState<Row[]>([emptyRow()])
   const [message, setMessage] = useState('')
   const [savedOrderNo, setSavedOrderNo] = useState('')
   const [scanCode, setScanCode] = useState('')
   const [scanMessage, setScanMessage] = useState('')
   const scanInputRef = useRef<HTMLInputElement>(null)
+  const inventoryRequest = useRef<AbortController | null>(null)
+  const scanRequest = useRef<AbortController | null>(null)
+  const scanSequence = useRef(0)
+  const scanLock = useRef(false)
 
   const warehouseType = warehouses.find((w) => w.id === warehouseId)?.type ?? 'WAREHOUSE'
   const available = useMemo(
     () =>
-      inventoryRows.filter(
+      loadedRows.filter(
         (r) =>
           r.warehouseId === warehouseId &&
           (warehouseType !== 'FACTORY' || r.processingFeeSettled),
       ),
-    [warehouseId, warehouseType, inventoryRows],
+    [warehouseId, warehouseType, loadedRows],
   )
   const choices = useMemo(
     () => getSaleInventoryChoices(available, warehouseId),
@@ -94,7 +104,42 @@ export function SaleForm({
     0,
   )
 
+  useEffect(() => () => {
+    inventoryRequest.current?.abort()
+    scanRequest.current?.abort()
+  }, [])
+
+  async function loadWarehouse(nextWarehouseId: string, preserveScan = false) {
+    if (!preserveScan) {
+      scanRequest.current?.abort()
+      scanSequence.current += 1
+      setScanLoading(false)
+    }
+    inventoryRequest.current?.abort()
+    const controller = new AbortController()
+    inventoryRequest.current = controller
+    setInventoryLoading(true)
+    setInventoryError('')
+    setLoadedRows([])
+    try {
+      const response = await fetch(`/api/sale-inventory?warehouseId=${encodeURIComponent(nextWarehouseId)}`, { cache: 'no-store', signal: controller.signal })
+      const data = await response.json().catch(() => ({}))
+      if (!response.ok) throw new Error(data.error || '库存加载失败')
+      if (controller.signal.aborted || inventoryRequest.current !== controller) return null
+      setLoadedRows(data.rows as InventoryRow[])
+      return data.rows as InventoryRow[]
+    } catch (error) {
+      if (controller.signal.aborted || inventoryRequest.current !== controller) return null
+      setInventoryError(error instanceof Error ? error.message : '库存加载失败')
+      setLoadedRows([])
+      return null
+    } finally {
+      if (!controller.signal.aborted) setInventoryLoading(false)
+    }
+  }
+
   function updateRow(idx: number, key: keyof Row, value: string) {
+    if (inventoryLoading || inventoryError || scanLoading || submitting) return
     markDirty()
     setRows((prev) =>
       prev.map((r, i) => {
@@ -117,88 +162,86 @@ export function SaleForm({
     )
   }
 
-  function addScannedLot(rawCode?: string) {
+  async function addScannedLot(rawCode?: string) {
+    if (inventoryLoading || inventoryError || scanLock.current || submitting) return
     const code = (rawCode ?? scanCode).trim()
     if (!code) return
+    scanLock.current = true
     setScanCode('')
-    const matched = findScannedInventory(inventoryRows, warehouseId, code)
-    if (!matched) {
-      setScanMessage('未找到该批次，请确认标签或改用手工选择')
-      return
-    }
-    const targetWarehouseType =
-      warehouses.find((w) => w.id === matched.warehouseId)?.type ?? 'WAREHOUSE'
-    if (matched.warehouseId !== warehouseId) {
-      if (rows.some((row) => row.inventoryId)) {
-        setScanMessage(
-          `该批次在 ${matched.warehouseName}；本单已有所选仓库的货，一张出库单只能对应一个仓库，请先保存或删清明细再扫`,
-        )
+    const controller = new AbortController()
+    scanRequest.current = controller
+    const sequence = ++scanSequence.current
+    setScanLoading(true)
+    setScanMessage('正在查找批次…')
+    try {
+      const response = await fetch(`/api/sale-inventory?warehouseId=${encodeURIComponent(warehouseId)}&code=${encodeURIComponent(code)}`, { cache: 'no-store', signal: controller.signal })
+      const data = await response.json().catch(() => ({}))
+      if (controller.signal.aborted || sequence !== scanSequence.current) return
+      if (!response.ok) throw new Error(data.error || '批次查找失败')
+      const matched = data.row as InventoryRow | null
+      if (!matched) {
+        setScanMessage('未找到该批次，请确认标签或改用手工选择')
         return
       }
-      setWarehouseId(matched.warehouseId)
-    }
-    if (
-      !inventoryRows.some(
-        (row) =>
-          row.warehouseId === matched.warehouseId &&
-          (targetWarehouseType !== 'FACTORY' || row.processingFeeSettled) &&
-          row.id === matched.id,
-      )
-    ) {
-      setScanMessage('该加工厂批次尚未完成加工核算，不能销售')
-      return
-    }
-    if (rows.some((row) => row.inventoryId === matched.id)) {
-      setScanMessage('该批次已在本单中，无需重复扫描')
-      return
-    }
-    markDirty()
-    const nextRow: Row = {
-      yarnName: matched.yarnName,
-      color: matched.color ?? '未填色号',
-      inventoryId: matched.id,
-      weight: matched.weight,
-      price: '',
-      packages: matched.packages?.toString() ?? '',
-    }
-    setRows((current) => {
-      const emptyIndex = current.findIndex(
-        (row) =>
-          !row.yarnName &&
-          !row.color &&
-          !row.inventoryId &&
-          !row.weight &&
-          !row.price &&
-          !row.packages,
-      )
-      if (emptyIndex < 0) return [...current, nextRow]
-      return current.map((row, index) => (index === emptyIndex ? nextRow : row))
-    })
-    setScanCode('')
-    setScanMessage(
-      matched.warehouseId !== warehouseId
+      const targetWarehouse = warehouses.find(w => w.id === matched.warehouseId)
+      if (!targetWarehouse) {
+        setScanMessage('该批次所在仓库已停用或资料已变化，请刷新页面后重试')
+        return
+      }
+      if (targetWarehouse.type === 'FACTORY' && !matched.processingFeeSettled) {
+        setScanMessage('该加工厂批次尚未完成加工核算，不能销售')
+        return
+      }
+      if (matched.warehouseId !== warehouseId) {
+        if (rows.some(row => row.inventoryId)) {
+          setScanMessage(`该批次在 ${matched.warehouseName}；本单已有所选仓库的货，一张出库单只能对应一个仓库，请先保存或删清明细再扫`)
+          return
+        }
+        const targetRows = await loadWarehouse(matched.warehouseId, true)
+        if (controller.signal.aborted || sequence !== scanSequence.current) return
+        if (!targetRows) { setScanMessage('该仓库库存加载失败，请重试加载库存后再扫码'); return }
+        setWarehouseId(matched.warehouseId)
+      }
+      if (rows.some(row => row.inventoryId === matched.id)) {
+        setScanMessage('该批次已在本单中，无需重复扫描')
+        return
+      }
+      setLoadedRows(current => [...current.filter(row => row.id !== matched.id), matched])
+      markDirty()
+      const nextRow: Row = {
+        yarnName: matched.yarnName, color: matched.color ?? '未填色号', inventoryId: matched.id,
+        weight: matched.weight, price: '', packages: matched.packages?.toString() ?? '',
+      }
+      setRows(current => {
+        if (current.some(row => row.inventoryId === matched.id)) return current
+        const emptyIndex = current.findIndex(row => !row.yarnName && !row.color && !row.inventoryId && !row.weight && !row.price && !row.packages)
+        if (emptyIndex < 0) return [...current, nextRow]
+        return current.map((row, index) => index === emptyIndex ? nextRow : row)
+      })
+      setScanMessage(matched.warehouseId !== warehouseId
         ? `已切换到 ${matched.warehouseName}，加入 ${matched.yarnName} · ${matched.lotNo ?? matched.batchNo}，默认全部 ${Number(matched.weight).toFixed(2)} kg`
-        : `已加入 ${matched.yarnName} · ${matched.lotNo ?? matched.batchNo}，默认全部 ${Number(matched.weight).toFixed(2)} kg`,
-    )
-    scanInputRef.current?.focus()
+        : `已加入 ${matched.yarnName} · ${matched.lotNo ?? matched.batchNo}，默认全部 ${Number(matched.weight).toFixed(2)} kg`)
+    } catch (error) {
+      if (!controller.signal.aborted && sequence === scanSequence.current) setScanMessage(error instanceof Error ? error.message : '批次查找失败')
+    } finally {
+      if (sequence === scanSequence.current) {
+        scanLock.current = false
+        setScanLoading(false)
+        requestAnimationFrame(() => scanInputRef.current?.focus())
+      }
+    }
   }
 
   function handleScanChange(value: string) {
     setScanCode(value)
-    // 扫码枪通常整段注入且不带回车：内容一旦完整命中某个批次码就立即加入，无需点击
-    const normalized = value.trim().toUpperCase()
-    if (
-      normalized.length >= 6 &&
-      inventoryRows.some(
-        (row) => row.scanCode?.toUpperCase() === normalized || row.lotNo?.toUpperCase() === normalized,
-      )
-    ) {
-      addScannedLot(value)
-    }
   }
 
   async function onSubmit(e: FormEvent<HTMLFormElement>) {
     e.preventDefault()
+    if (inventoryLoading || inventoryError || scanLock.current || submitting) {
+      setMessage('库存仍在加载或扫码处理中，请稍候再保存。')
+      return
+    }
     setMessage('')
     const form = new FormData(e.currentTarget)
     const body = {
@@ -228,6 +271,7 @@ export function SaleForm({
       markSaved()
       setSavedOrderNo(data.orderNo)
       setRows([emptyRow()])
+      void loadWarehouse(warehouseId)
       router.refresh()
     } else {
       const data = await res.json().catch(() => ({}))
@@ -237,10 +281,10 @@ export function SaleForm({
 
   return (
     <form onSubmit={onSubmit} onChange={markDirty} className="space-y-5">
-      <div className="form-section grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
+      <fieldset disabled={scanLoading || submitting} className="form-section grid min-w-0 gap-4 sm:grid-cols-2 lg:grid-cols-4">
 <BusinessDateField onChange={markDirty} />
 <ChoiceField label="客户" name="customerId" options={customers} value={customerId} onChange={(value) => { markDirty(); setCustomerId(value) }} memoryKey={"sale:customer:" + defaultHandler} />
-<ChoiceField label="仓库" options={warehouses} value={warehouseId} onChange={(value) => { if (value === warehouseId) return; if (rows.some((row) => row.inventoryId) && !confirmDiscard()) return; markDirty(); setWarehouseId(value); setRows([emptyRow()]) }} memoryKey={"sale:warehouse:" + defaultHandler} />
+<ChoiceField label="仓库" options={warehouses} value={warehouseId} onChange={(value) => { if (scanLock.current || submitting || value === warehouseId) return; if (rows.some((row) => row.inventoryId) && !confirmDiscard()) return; markDirty(); setWarehouseId(value); setRows([emptyRow()]); void loadWarehouse(value) }} memoryKey={"sale:warehouse:" + defaultHandler} />
         <label className="text-sm">
           经办人
           <Select name="handlerName" defaultValue={defaultHandler ?? '刚'} required>
@@ -256,7 +300,7 @@ export function SaleForm({
           备注
           <Input name="note" placeholder="选填" />
         </label>
-      </div>
+      </fieldset>
 
       <div className="rounded-lg border border-blue-200 bg-blue-50 p-3">
         <label className="block text-sm font-medium text-blue-950">
@@ -265,29 +309,38 @@ export function SaleForm({
             <Input
               ref={scanInputRef}
               autoFocus
+              disabled={inventoryLoading || !!inventoryError || scanLoading || submitting}
+              aria-label="扫描标签二维码"
               value={scanCode}
               onChange={(event) => handleScanChange(event.target.value)}
               onKeyDown={(event) => {
                 if (event.key === 'Enter') {
                   event.preventDefault()
-                  addScannedLot()
+                  void addScannedLot()
                 }
               }}
-              placeholder="扫描标签二维码或输入内部批次号"
+              placeholder="扫描 YMS-二维码或输入 LOT-内部批次号"
               autoComplete="off"
+              autoCapitalize="none"
+              autoCorrect="off"
+              spellCheck={false}
             />
-            <Button type="button" onClick={() => addScannedLot()}>
+            <Button type="button" disabled={inventoryLoading || !!inventoryError || scanLoading || submitting} onClick={() => void addScannedLot()}>
               加入
             </Button>
           </div>
         </label>
         <p className="mt-1 text-xs text-blue-800">
-          扫入完整批次码后自动加入本单，批次在其他仓库时自动切换仓库（本单已有明细时除外）；
+          扫码、输入或粘贴后，按回车或点击“加入”；批次在其他仓库时自动切换仓库（本单已有明细时除外）；
           默认卖出全部余量和件数，部分卖出时直接修改下方重量和件数。
         </p>
-        {scanMessage && <Notice tone={scanMessage.startsWith("已加入") || scanMessage.startsWith("已切换到") ? "success" : "info"}>{scanMessage}</Notice>}
+        {scanMessage && <Notice tone={scanMessage.startsWith("已加入") ? "success" : "info"}>{scanMessage}</Notice>}
       </div>
 
+      {inventoryLoading && <Notice>正在加载该仓库库存…</Notice>}
+      {inventoryError && <div><Notice>{inventoryError}</Notice><Button type="button" variant="secondary" onClick={() => void loadWarehouse(warehouseId)}>重试加载库存</Button></div>}
+
+      <fieldset disabled={inventoryLoading || !!inventoryError || scanLoading || submitting} className="min-w-0 space-y-5">
       {rows.map((row, idx) => (
         <div
           key={idx}
@@ -363,7 +416,7 @@ export function SaleForm({
           />
           <Button
             type="button"
-            disabled={rows.length === 1}
+            disabled={rows.length === 1 || scanLoading || submitting}
             onClick={() => { markDirty(); setRows((prev) => prev.filter((_, i) => i !== idx)) }}
             variant="secondary"
           >
@@ -375,6 +428,7 @@ export function SaleForm({
       ))}
       <Button
         type="button"
+        disabled={scanLoading || submitting}
         onClick={() =>
           setRows((prev) => [...prev, emptyRow()])
         }
@@ -382,6 +436,7 @@ export function SaleForm({
         加一行
       </Button>
 
+      </fieldset>
       <div className="form-footer">
         <p className="text-base font-semibold">货款合计：¥{formatNumber(total)}</p><p className="text-sm text-slate-600">{warehouses.find((row) => row.id === warehouseId)?.name} → {customers.find((row) => row.id === customerId)?.name}</p>
         {savedOrderNo && (
@@ -391,7 +446,7 @@ export function SaleForm({
         )}
         <Notice>{message}</Notice>
         <div className="flex justify-end">
-          <Button type="submit" disabled={submitting} className="w-full sm:w-auto sm:min-w-40">
+          <Button type="submit" disabled={submitting || scanLoading || inventoryLoading || !!inventoryError} className="w-full sm:w-auto sm:min-w-40">
             {submitting ? '保存中…' : '保存出库单'}
           </Button>
         </div>

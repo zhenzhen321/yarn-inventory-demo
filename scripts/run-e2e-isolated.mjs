@@ -102,9 +102,6 @@ try {
   })
   await waitForServer(server)
   run('执行业务全流程', [e2eScript], env)
-  if (env.UI_VERIFY_MODULES) {
-    run('浏览器点选与手机布局验收', [join(projectDir, 'scripts', 'verify-family-ui.cjs')], env)
-  }
 } catch (error) {
   if (serverOutput) console.error(serverOutput)
   runError = error

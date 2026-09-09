@@ -1,36 +1,33 @@
 import Link from 'next/link'
 import { prisma } from '@/lib/prisma'
 import { Table } from '@/components/ui/Table'
-import { getInventoryValuation } from '@/services/reports'
+import { getDashboardInventory } from '@/services/dashboard'
+import { getActiveWarehouses } from '@/lib/master-data-cache'
 import { OrderTraceLink } from '@/components/orders/OrderTraceLink'
 import { businessDateToday, formatBusinessDate } from '@/lib/business-date'
 import { formatNumber } from '@/lib/display'
 
 export default async function DashboardPage() {
-  const [inventory, recent, valuation, lastStocktakes, warehouses] = await Promise.all([
-    prisma.inventory.findMany({
-      where: { archived: false, weight: { gt: 0 } },
-      include: { warehouse: true, variant: { include: { yarn: true } }, batch: true },
-      orderBy: [{ warehouse: { name: 'asc' } }, { variant: { yarn: { name: 'asc' } } }],
-    }),
+  const [inventory, recent, lastStocktakes, warehouses] = await Promise.all([
+    getDashboardInventory(prisma),
     prisma.purchaseOrder.findMany({
       where: { reversedAt: null }, orderBy: { createdAt: 'desc' }, take: 5,
-      include: { supplier: true, warehouse: true },
+      select: { id: true, orderNo: true, date: true, handlerName: true, totalAmount: true,
+        supplier: { select: { name: true } }, warehouse: { select: { name: true } } },
     }),
-    getInventoryValuation(prisma),
     prisma.stocktake.groupBy({ by: ['warehouseId'], _max: { date: true } }),
-    prisma.warehouse.findMany({ where: { active: true }, orderBy: { name: 'asc' } }),
+    getActiveWarehouses(),
   ])
   const lastStocktakeByWarehouse = new Map(
     lastStocktakes.map((row) => [row.warehouseId, row._max.date]),
   )
   const totals = warehouses.map((warehouse) => {
-    const rows = inventory.filter((row) => row.warehouseId === warehouse.id)
+    const summary = inventory.byWarehouse.get(warehouse.id)
     const last = lastStocktakeByWarehouse.get(warehouse.id) ?? null
     const days = last ? Math.floor((Date.parse(businessDateToday()) - Date.parse(formatBusinessDate(last))) / 86400000) : null
-    return { ...warehouse, weight: rows.reduce((sum, row) => sum + Number(row.weight), 0),
-      batches: new Set(rows.map((row) => row.lotId ?? row.batchId)).size,
-      value: Number(valuation.find((row) => row.name === warehouse.name)?.value ?? 0),
+    return { ...warehouse, weight: summary?.weight ?? 0,
+      batches: summary?.batches ?? 0,
+      value: summary?.value ?? 0,
       days, overdue: days !== null && days > (warehouse.stocktakeIntervalDays ?? 30) }
   })
   const attention = totals.filter((row) => row.days === null || row.overdue)
@@ -46,7 +43,7 @@ export default async function DashboardPage() {
     <section className="grid grid-cols-2 gap-3 lg:grid-cols-4" aria-label="库存摘要">
       {[['当前库存总重量', formatNumber(totals.reduce((sum, row) => sum + row.weight, 0)), 'kg'],
         ['库存金额约', formatNumber(totals.reduce((sum, row) => sum + row.value, 0)), '元'],
-        ['在库批次余额', String(inventory.length), '条'], ['待关注盘点', String(attention.length), '个仓库']].map(([label, value, unit]) =>
+        ['在库批次余额', String(inventory.balanceCount), '条'], ['待关注盘点', String(attention.length), '个仓库']].map(([label, value, unit]) =>
         <div key={label} className="form-section"><p className="text-sm text-slate-600">{label}</p><p className="mt-2 break-all text-2xl font-bold tabular-nums text-slate-900">{value}</p><p className="mt-1 text-sm text-slate-500">{unit}</p></div>)}
     </section>
     <section aria-label="快捷办理"><h2 className="mb-3 text-lg font-bold">今天要办什么？</h2>

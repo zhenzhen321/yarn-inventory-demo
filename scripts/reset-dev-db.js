@@ -1,6 +1,6 @@
 // 清空开发库全部业务数据，仅保留两个管理员账号（admin / clerk）
 // 密码从 .env 的 ADMIN1_PASSWORD / ADMIN2_PASSWORD 读取（.env 不入库）
-// 用法：node scripts/reset-dev-db.js（在 yarn-ms 目录下执行）
+// 用法：node scripts/reset-dev-db.js（在项目目录下执行）
 const { readFileSync } = require('node:fs')
 const { PrismaClient } = require('@prisma/client')
 const bcrypt = require('bcryptjs')

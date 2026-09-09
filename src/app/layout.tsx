@@ -9,7 +9,15 @@ export const metadata: Metadata = {
 export default function RootLayout({ children }: { children: React.ReactNode }) {
   return (
     <html lang="zh-CN">
-      <body className="min-h-screen bg-gray-50 text-gray-900">{children}</body>
+      <body className="min-h-screen bg-gray-50 text-gray-900">
+        <script
+          dangerouslySetInnerHTML={{
+            __html:
+              "try{if(localStorage.getItem('yarn-ui:dark')==='1')document.documentElement.classList.add('dark')}catch(e){}",
+          }}
+        />
+        {children}
+      </body>
     </html>
   )
 }

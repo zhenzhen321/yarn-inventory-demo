@@ -28,13 +28,23 @@ export function AppShell({ userName, children }: { userName: string; children: R
   const pathname = usePathname()
   const [menu, setMenu] = useState(false)
   const [large, setLarge] = useState(false)
+  const [dark, setDark] = useState(false)
   useEffect(() => {
     try { setLarge(localStorage.getItem('yarn-ui:large-text:' + userName) === '1') } catch {}
   }, [userName])
+  useEffect(() => {
+    try { setDark(document.documentElement.classList.contains('dark')) } catch {}
+  }, [])
   function toggleTextSize() {
     const next = !large
     setLarge(next)
     try { localStorage.setItem('yarn-ui:large-text:' + userName, next ? '1' : '0') } catch {}
+  }
+  function toggleDark() {
+    const next = !dark
+    setDark(next)
+    document.documentElement.classList.toggle('dark', next)
+    try { localStorage.setItem('yarn-ui:dark', next ? '1' : '0') } catch {}
   }
   const active = [...nav, ...more.flatMap((group) => group.items)].reduce<(typeof nav)[number] | null>((best, item) => {
     const root = item.href.endsWith('/new') ? item.href.slice(0, -4) : item.href
@@ -51,6 +61,7 @@ export function AppShell({ userName, children }: { userName: string; children: R
         </Link>
         <div className="flex items-center gap-3">
           <button type="button" className="choice-chip" aria-pressed={large} onClick={toggleTextSize}>{large ? '标准字' : '大字'}</button>
+          <button type="button" className="choice-chip" aria-pressed={dark} onClick={toggleDark} aria-label="切换深色模式">{dark ? '浅色' : '深色'}</button>
           <span className="hidden text-sm text-slate-600 sm:inline">{userName}</span>
           <form action="/api/auth/logout" method="post"><button className="min-h-11 text-sm text-slate-600">退出</button></form>
         </div>

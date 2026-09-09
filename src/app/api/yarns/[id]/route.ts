@@ -3,6 +3,7 @@ import { prisma } from '@/lib/prisma'
 import { yarnUpdateSchema } from '@/lib/validation'
 import { requireAdmin } from '@/lib/auth'
 import { logAudit } from '@/lib/audit'
+import { invalidateMasterData } from '@/lib/master-data-cache'
 import { deleteYarnSafe } from '@/services/deletion'
 import { updateYarnMaster } from '@/services/yarns'
 
@@ -29,6 +30,7 @@ export async function PATCH(req: Request, { params }: { params: Promise<{ id: st
     const status = message === '纱线不存在' ? 404 : message.startsWith('已存在') ? 409 : 400
     return NextResponse.json({ error: message }, { status })
   }
+  invalidateMasterData()
   await logAudit({
     userName: admin.name,
     action: 'YARN_UPDATE',
@@ -55,6 +57,7 @@ export async function DELETE(req: Request, { params }: { params: Promise<{ id: s
   if (!admin) return NextResponse.json({ error: '无权限：仅最高管理员可删除' }, { status: 403 })
   try {
     const row = await deleteYarnSafe(prisma, id)
+    invalidateMasterData()
     await logAudit({
       userName: admin.name,
       action: 'YARN_DELETE',

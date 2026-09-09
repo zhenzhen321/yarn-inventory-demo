@@ -85,23 +85,23 @@ async function main() {
 
   // ---------- 基础档案 ----------
   const whMain = await prisma.warehouse.create({
-    data: { name: '华东仓', type: 'WAREHOUSE', manager: '张伟', stocktakeIntervalDays: 30 },
+    data: { name: '演示仓-A', type: 'WAREHOUSE', manager: '演示管理员-A', stocktakeIntervalDays: 30 },
   })
   const whWest = await prisma.warehouse.create({
-    data: { name: '城西仓', type: 'WAREHOUSE', manager: '李娜', stocktakeIntervalDays: 30 },
+    data: { name: '演示仓-B', type: 'WAREHOUSE', manager: '演示管理员-B', stocktakeIntervalDays: 30 },
   })
   const factory = await prisma.warehouse.create({
-    data: { name: '城南加工厂', type: 'FACTORY', manager: '王强', stocktakeIntervalDays: 30 },
+    data: { name: '演示加工厂-C', type: 'FACTORY', manager: '演示管理员-C', stocktakeIntervalDays: 30 },
   })
 
   const supplier = await prisma.counterparty.create({
-    data: { name: '江南纺织原料有限公司', type: 'SUPPLIER', contact: '陈经理', phone: '000-0000-0001' },
+    data: { name: '虚构供应商-甲', type: 'SUPPLIER', contact: '联系人-甲', phone: '000-0000-1001' },
   })
   const customer = await prisma.counterparty.create({
-    data: { name: '沪上织造有限公司', type: 'CUSTOMER', contact: '刘总', phone: '000-0000-0002' },
+    data: { name: '虚构客户-乙', type: 'CUSTOMER', contact: '联系人-乙', phone: '000-0000-1002' },
   })
   const both = await prisma.counterparty.create({
-    data: { name: '义乌针织经销部', type: 'BOTH', contact: '赵经理', phone: '000-0000-0003' },
+    data: { name: '虚构往来单位-丙', type: 'BOTH', contact: '联系人-丙', phone: '000-0000-1003' },
   })
 
   const cotton = await prisma.yarn.create({ data: { name: '纯棉纱', note: '32支/40支现货' } })
@@ -188,10 +188,10 @@ async function main() {
     fromWarehouseId: whMain.id,
     toWarehouseId: whWest.id,
     handlerName: 'admin',
-    note: '调拨至城西仓周转',
+    note: '调拨至演示仓-B周转',
     items: [{ inventoryId: invCottonMain2.id, weight: 300, packages: 12 }],
   })
-  await log(admin.id, 'admin', '仓库调拨', to1.orderNo, '纯棉纱 32支/本白 300kg 华东仓→城西仓')
+  await log(admin.id, 'admin', '仓库调拨', to1.orderNo, '纯棉纱 32支/本白 300kg 演示仓-A→演示仓-B')
 
   // ---------- 送加工 + 加工费结算 ----------
   const invPolyMain2 = await findInv('TC20260805', whMain.id)
@@ -204,7 +204,7 @@ async function main() {
     freight: 50,
     items: [{ inventoryId: invPolyMain2.id, weight: 150, packages: 6 }],
   })
-  await log(admin.id, 'admin', '送加工', to2.orderNo, '涤棉纱 32支/浅灰 150kg → 城南加工厂')
+  await log(admin.id, 'admin', '送加工', to2.orderNo, '涤棉纱 32支/浅灰 150kg → 演示加工厂-C')
 
   const invPolyFactory = await findInv('TC20260805', factory.id)
   await settleProcessingFee(prisma, invPolyFactory.id, {
@@ -242,7 +242,7 @@ async function main() {
       },
     ],
   })
-  await log(admin.id, 'admin', '加工收回', pr1.orderNo, '28支/宝蓝 100kg 退回华东仓')
+  await log(admin.id, 'admin', '加工收回', pr1.orderNo, '28支/宝蓝 100kg 退回演示仓-A')
 
   // ---------- 盘库 ----------
   const invAcrylicWest = await findInv('J20260806', whWest.id)
@@ -264,7 +264,7 @@ async function main() {
     method: '银行转账',
     handlerName: 'admin',
   })
-  await log(admin.id, 'admin', '结算登记', 'PURCHASE', '江南纺织原料 付款15000')
+  await log(admin.id, 'admin', '结算登记', 'PURCHASE', '虚构供应商-甲 付款15000')
 
   await createSettlement(prisma, {
     side: 'PURCHASE',
@@ -282,13 +282,13 @@ async function main() {
     method: '银行转账',
     handlerName: 'clerk',
   })
-  await log(clerk.id, 'clerk', '收款登记', s3.id, '义乌针织经销部 收款1000')
+  await log(clerk.id, 'clerk', '收款登记', s3.id, '虚构往来单位-丙 收款1000')
 
   // ---------- 加工费付款（欠180） ----------
   const fp1 = await prisma.processingFeePayment.create({
     data: { factoryId: factory.id, amount: 100, date: day('2026-08-15'), method: '微信转账', handlerName: 'admin' },
   })
-  await log(admin.id, 'admin', '加工费付款', fp1.id, '城南加工厂 付款100')
+  await log(admin.id, 'admin', '加工费付款', fp1.id, '演示加工厂-C 付款100')
 
   // ---------- 同一供应商批号再次采购：形成新的内部批次 ----------
   const po4 = await createPurchase(prisma, {

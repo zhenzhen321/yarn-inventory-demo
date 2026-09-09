@@ -263,7 +263,7 @@ export function LabelPrintButton({
             <div className="mt-3 grid gap-3">
               {order.items.map((item, index) => (
                 <div key={`preview-${item.lotNo || index}`} className="space-y-1">
-                  <div className="max-w-full overflow-x-auto border border-dashed border-gray-400 bg-white">
+                  <div className="keep-light max-w-full overflow-x-auto border border-dashed border-gray-400 bg-white">
                     {previewReady ? (
                       <iframe
                         title={`标签效果预览 ${index + 1}`}

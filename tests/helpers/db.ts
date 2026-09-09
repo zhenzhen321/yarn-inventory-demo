@@ -1,4 +1,4 @@
-import { execSync } from 'node:child_process'
+import { execFileSync } from 'node:child_process'
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { PrismaClient } from '@prisma/client'
@@ -23,7 +23,9 @@ export function getTestDb(): PrismaClient {
   if (db) return db
   prepareTestSchema()
   process.env.DATABASE_URL = TEST_DB_URL
-  execSync(`npx prisma db push --skip-generate --schema "${TEST_SCHEMA_FILE}"`, {
+  // 命令与参数全部为字面量；schema.test.prisma 由 prepareTestSchema 写入 process.cwd()
+  execFileSync(process.execPath, ['node_modules/prisma/build/index.js', 'db', 'push', '--skip-generate', '--schema', 'prisma/schema.test.prisma'], {
+    cwd: process.cwd(),
     stdio: 'ignore',
   })
   db = new PrismaClient()

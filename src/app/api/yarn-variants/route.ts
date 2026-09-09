@@ -3,6 +3,7 @@ import { prisma } from '@/lib/prisma'
 import { yarnVariantSchema } from '@/lib/validation'
 import { getSessionUser } from '@/lib/auth'
 import { logAudit } from '@/lib/audit'
+import { invalidateMasterData } from '@/lib/master-data-cache'
 
 export async function GET(req: Request) {
   const url = new URL(req.url)
@@ -28,6 +29,7 @@ export async function POST(req: Request) {
   }
   try {
     const row = await prisma.yarnVariant.create({ data: parsed.data, include: { yarn: true } })
+    invalidateMasterData()
     await logAudit({
       userName: user?.name ?? '未知',
       action: 'YARN_VARIANT_CREATE',

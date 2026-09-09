@@ -75,21 +75,22 @@ function outputFromRow(row: FactoryInventoryRow): OutputDraft {
   }
 }
 
-export function ProcessingFeeSettle({ rows }: { rows: FactoryInventoryRow[] }) {
-  const [open, setOpen] = useState(false)
+export function ProcessingFeeSettle({ rows, expanded, busy = false, hideToggle = false, onCompleted }: { rows: FactoryInventoryRow[]; expanded?: boolean; busy?: boolean; hideToggle?: boolean; onCompleted?: () => void }) {
+  const [internalOpen, setOpen] = useState(false)
+  const open = expanded ?? internalOpen
   const [active, setActive] = useState<FactoryInventoryRow | null>(null)
   const [completedLabel, setCompletedLabel] = useState<LabelPrintOrder | null>(null)
 
   return (
     <section className="space-y-3">
-      <div className="flex items-center gap-2">
+      {!hideToggle && <div className="flex items-center gap-2">
         <CollapseToggle
           expanded={open}
           onClick={() => setOpen((value) => !value)}
           label="展开/收起加工完工核算"
         />
         <h2 className="text-lg font-bold">加工厂 · 完工核算</h2>
-      </div>
+      </div>}
       {completedLabel && (
         <div className="flex flex-wrap items-center justify-between gap-3 rounded-lg border border-green-200 bg-green-50 p-3">
           <p className="text-sm font-medium text-green-800">
@@ -140,6 +141,7 @@ export function ProcessingFeeSettle({ rows }: { rows: FactoryInventoryRow[] }) {
                     {!row.settled && row.weight > 0 && (
                       <Button
                         type="button"
+                        disabled={busy}
                         onClick={() => setActive(row)}
                         className="bg-blue-600 text-xs hover:bg-blue-700"
                       >
@@ -161,6 +163,7 @@ export function ProcessingFeeSettle({ rows }: { rows: FactoryInventoryRow[] }) {
           onCompleted={(labelOrder) => {
             setCompletedLabel(labelOrder)
             setActive(null)
+            onCompleted?.()
           }}
         />
       )}

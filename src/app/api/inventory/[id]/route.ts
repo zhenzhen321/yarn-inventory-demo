@@ -3,6 +3,7 @@ import { z } from 'zod'
 import { prisma } from '@/lib/prisma'
 import { getSessionUser } from '@/lib/auth'
 import { logAudit } from '@/lib/audit'
+import { invalidateMasterData } from '@/lib/master-data-cache'
 import { settleProcessingFeeIdempotent } from '@/services/inventory'
 import { businessDateFromInput } from '@/lib/business-date'
 import { idempotencyKeyFromRequest } from '@/services/idempotency'
@@ -55,6 +56,7 @@ export async function PATCH(req: Request, { params }: { params: Promise<{ id: st
       date: parsed.data.date,
       note: parsed.data.note,
     }, idempotencyKeyFromRequest(req))
+    invalidateMasterData()
     const result = operation.value
     if (!operation.replayed) await logAudit({
       userName: user.name,

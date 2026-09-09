@@ -51,6 +51,9 @@ async function createSaleInTransaction(
     for (let i = 0; i < input.items.length; i++) {
       const row = rows[i]
       if (!row) throw new Error(`库存记录不存在：${input.items[i].inventoryId}`)
+      if (row.archived) {
+        throw new Error(`库存已归档，不能销售：${row.variant.yarn.name} ${row.variant.color} 批次 ${row.batch.batchNo}`)
+      }
       if (row.warehouseId !== input.warehouseId) {
         throw new Error(`库存 ${row.variant.yarn.name} ${row.variant.color} 不在所选仓库`)
       }

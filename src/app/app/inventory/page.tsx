@@ -2,15 +2,13 @@ import Link from 'next/link'
 import { prisma } from '@/lib/prisma'
 import { businessDateToday, formatBusinessDate } from '@/lib/business-date'
 import { buildInventoryGroups } from '@/lib/inventory-presentation'
-import { getInventoryRows } from '@/services/inventory'
+import { getActiveWarehouses } from '@/lib/master-data-cache'
+import { getInventoryPage } from '@/services/inventory'
 import { Table } from '@/components/ui/Table'
 import { Pager } from '@/components/ui/Pager'
 import { InventoryFilter } from '@/components/inventory/InventoryFilter'
 import { CurrentInventoryLabelButton } from '@/components/labels/CurrentInventoryLabelButton'
-import {
-  ProcessingFeeSettle,
-  type FactoryInventoryRow,
-} from '@/components/inventory/ProcessingFeeSettle'
+import { LazyProcessingFeeSettle } from '@/components/inventory/LazyProcessingFeeSettle'
 
 function sourceLabel(sourceType: string) {
   if (sourceType === 'PURCHASE') return '采购入库'
@@ -21,24 +19,19 @@ function sourceLabel(sourceType: string) {
 const inventoryGridColumns =
   'grid-cols-[minmax(180px,1.6fr)_100px_minmax(100px,1fr)_minmax(110px,1fr)_minmax(90px,1fr)_80px_110px_80px_minmax(140px,1fr)]'
 
-const GROUP_PAGE_SIZE = 20
-
 export default async function InventoryPage({
   searchParams,
 }: {
   searchParams: Promise<{ warehouseId?: string; q?: string; includeZero?: string; page?: string }>
 }) {
   const filters = await searchParams
-  const warehouses = await prisma.warehouse.findMany({
-    where: { active: true },
-    orderBy: { name: 'asc' },
-  })
-  const rows = await getInventoryRows(prisma, {
+  const groupPage = Math.max(1, Number.parseInt(filters.page ?? '1', 10) || 1)
+  const [warehouses, result] = await Promise.all([getActiveWarehouses(), getInventoryPage(prisma, {
     warehouseId: filters.warehouseId,
     q: filters.q,
     includeZero: filters.includeZero === '1',
-  })
-  const total = rows.reduce((sum, row) => sum + Number(row.weight), 0)
+  }, groupPage)])
+  const { rows } = result
   const presentationRows = rows.map((row) => {
     const purchase = row.lot?.purchaseItem?.order
     const processing = row.lot?.processingOutput?.job
@@ -76,12 +69,8 @@ export default async function InventoryPage({
     }
   })
   const groups = buildInventoryGroups(presentationRows)
-  const totalPages = Math.max(1, Math.ceil(groups.length / GROUP_PAGE_SIZE))
-  const groupPage = Math.min(Math.max(1, Number.parseInt(filters.page ?? '1', 10) || 1), totalPages)
-  const visibleGroups = groups.slice(
-    (groupPage - 1) * GROUP_PAGE_SIZE,
-    groupPage * GROUP_PAGE_SIZE,
-  )
+  const totalPages = result.totalPages
+  const visibleGroups = groups
   const pagerHref = (p: number) => {
     const params = new URLSearchParams()
     if (filters.warehouseId) params.set('warehouseId', filters.warehouseId)
@@ -91,41 +80,25 @@ export default async function InventoryPage({
     const query = params.toString()
     return '/app/inventory' + (query ? `?${query}` : '')
   }
-  const factoryRows: FactoryInventoryRow[] = rows
-    .filter((row) => row.warehouse.type === 'FACTORY')
-    .map((row) => ({
-      id: row.id,
-      warehouseId: row.warehouseId,
-      warehouseName: row.warehouse.name,
-      yarnId: row.variant.yarnId,
-      yarnName: row.variant.yarn.name,
-      spec: row.variant.spec,
-      color: row.variant.color,
-      unit: row.variant.unit,
-      batchNo: row.batch.batchNo,
-      lotNo: row.lot?.lotNo ?? null,
-      weight: Number(row.weight),
-      packages: row.packages,
-      cost: Number(row.cost),
-      freight: Number(row.freight),
-      feePerKg: row.processingFeePerKg ? Number(row.processingFeePerKg) : null,
-      settled: row.processingFeeSettled,
-    }))
-
   return (
     <div className="space-y-4">
       <h1 className="text-xl font-bold">库存查询</h1>
-      <ProcessingFeeSettle rows={factoryRows} />
+      <LazyProcessingFeeSettle
+        key={JSON.stringify([filters.warehouseId ?? '', filters.q ?? '', filters.includeZero === '1'])}
+        warehouseId={filters.warehouseId}
+        q={filters.q}
+        includeZero={filters.includeZero === '1'}
+      />
       <InventoryFilter
         warehouses={warehouses}
         includeZero={filters.includeZero === '1'}
       />
       <p className="text-sm text-gray-600">
-        共 {groups.length} 个来源单据，包含 {rows.length} 个批次余额，总重量{' '}
-        {total.toFixed(2)} kg
+        共 {result.totalGroups} 个来源单据，包含 {result.totalRows} 个批次余额，总重量{' '}
+        {Number(result.totalWeight).toFixed(2)} kg
       </p>
 
-      {groups.length === 0 && <div className="form-section text-slate-600">没有符合条件的库存。可清空筛选，或在收到货时登记买入入库。</div>}
+      {result.totalGroups === 0 && <div className="form-section text-slate-600">没有符合条件的库存。可清空筛选，或在收到货时登记买入入库。</div>}
       <div className="inventory-ledger overflow-x-auto rounded-xl border bg-white text-sm">
         <div className="min-w-[1180px]">
           <div
@@ -231,7 +204,7 @@ export default async function InventoryPage({
         </div>
       </div>
       <Pager
-        page={groupPage}
+        page={result.page}
         totalPages={totalPages}
         label="库存分组翻页"
         buildHref={pagerHref}

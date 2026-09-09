@@ -3,6 +3,7 @@ import { prisma } from '@/lib/prisma'
 import { counterpartySchema } from '@/lib/validation'
 import { getSessionUser } from '@/lib/auth'
 import { logAudit } from '@/lib/audit'
+import { invalidateMasterData } from '@/lib/master-data-cache'
 import { getDiscountByCounterparty } from '@/services/settlement'
 
 export async function GET(req: Request) {
@@ -42,6 +43,7 @@ export async function POST(req: Request) {
   const parsed = counterpartySchema.safeParse(body)
   if (!parsed.success) return NextResponse.json({ error: '参数不正确' }, { status: 400 })
   const row = await prisma.counterparty.create({ data: parsed.data })
+  invalidateMasterData()
   await logAudit({
     userName: user?.name ?? '未知',
     action: 'COUNTERPARTY_CREATE',

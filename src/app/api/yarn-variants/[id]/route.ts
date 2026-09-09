@@ -3,6 +3,7 @@ import { prisma } from '@/lib/prisma'
 import { yarnVariantUpdateSchema } from '@/lib/validation'
 import { requireAdmin } from '@/lib/auth'
 import { logAudit } from '@/lib/audit'
+import { invalidateMasterData } from '@/lib/master-data-cache'
 import { deleteYarnVariantSafe } from '@/services/deletion'
 
 export async function PATCH(req: Request, { params }: { params: Promise<{ id: string }> }) {
@@ -24,6 +25,7 @@ export async function PATCH(req: Request, { params }: { params: Promise<{ id: st
     .update({ where: { id: id }, data: parsed.data, include: { yarn: true } })
     .catch(() => null)
   if (!row) return NextResponse.json({ error: '记录不存在' }, { status: 404 })
+  invalidateMasterData()
   await logAudit({
     userName: admin.name,
     action: 'YARN_VARIANT_UPDATE',
@@ -39,6 +41,7 @@ export async function DELETE(req: Request, { params }: { params: Promise<{ id: s
   if (!admin) return NextResponse.json({ error: '无权限：仅最高管理员可删除' }, { status: 403 })
   try {
     const row = await deleteYarnVariantSafe(prisma, id)
+    invalidateMasterData()
     await logAudit({
       userName: admin.name,
       action: 'YARN_VARIANT_DELETE',

@@ -4,6 +4,7 @@ import { purchaseSchema } from '@/lib/validation'
 import { createPurchaseIdempotent } from '@/services/inventory'
 import { getSessionUser } from '@/lib/auth'
 import { logAudit } from '@/lib/audit'
+import { invalidateMasterData } from '@/lib/master-data-cache'
 import { idempotencyKeyFromRequest } from '@/services/idempotency'
 
 export async function POST(req: Request) {
@@ -23,6 +24,7 @@ export async function POST(req: Request) {
       parsed.data,
       idempotencyKeyFromRequest(req),
     )
+    invalidateMasterData()
     const order = result.value
     if (!result.replayed) await logAudit({
       userName: user?.name ?? '未知',

@@ -1,43 +1,27 @@
 import { prisma } from '@/lib/prisma'
 import { getSessionUser } from '@/lib/auth'
 import { SaleForm } from '@/components/sales/SaleForm'
+import { getSaleInventoryOptions } from '@/services/sale-options'
+import { getActiveCounterparties, getActiveWarehouses } from '@/lib/master-data-cache'
 
 export default async function NewSalePage() {
-  const [warehouses, customers, inventory] = await Promise.all([
-    prisma.warehouse.findMany({ where: { active: true }, orderBy: { name: 'asc' } }),
-    prisma.counterparty.findMany({
-      where: { active: true, type: { in: ['CUSTOMER', 'BOTH'] } },
-      orderBy: { name: 'asc' },
-    }),
-    prisma.inventory.findMany({
-      where: { weight: { gt: 0 } },
-      include: { warehouse: true, variant: { include: { yarn: true } }, batch: true, lot: true },
-      orderBy: [{ warehouse: { name: 'asc' } }, { variant: { yarn: { name: 'asc' } } }],
-    }),
+  const [warehouses, customers, user] = await Promise.all([
+    getActiveWarehouses(),
+    getActiveCounterparties(),
+    getSessionUser(),
   ])
-  const user = await getSessionUser()
+  const defaultWarehouse = warehouses[0]
+  const customersForSale = customers.filter((row) => row.type === 'CUSTOMER' || row.type === 'BOTH')
+  const inventoryRows = defaultWarehouse ? await getSaleInventoryOptions(prisma, defaultWarehouse.id) : []
   return (
     <div className="space-y-4">
       <h1 className="text-xl font-bold">卖出出库</h1>
       <SaleForm
         defaultHandler={user?.name ?? '刚'}
-        customers={customers}
+        customers={customersForSale}
         warehouses={warehouses.map((w) => ({ id: w.id, name: w.name, type: w.type }))}
-        inventoryRows={inventory.map((r) => ({
-          id: r.id,
-          warehouseId: r.warehouseId,
-          warehouseName: r.warehouse.name,
-          yarnName: r.variant.yarn.name,
-          spec: r.variant.spec,
-          color: r.variant.color,
-          unit: r.variant.unit,
-          batchNo: r.batch.batchNo,
-          lotNo: r.lot?.lotNo ?? null,
-          scanCode: r.lot?.scanCode ?? null,
-          weight: r.weight.toString(),
-          packages: r.packages,
-          processingFeeSettled: r.processingFeeSettled,
-        }))}
+        initialWarehouseId={defaultWarehouse?.id ?? ''}
+        inventoryRows={inventoryRows}
       />
     </div>
   )

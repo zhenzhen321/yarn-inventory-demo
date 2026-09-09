@@ -9,5 +9,5 @@ export async function GET(req: Request) {
     q: url.searchParams.get('q') ?? undefined,
     includeZero: url.searchParams.get('includeZero') === '1',
   })
-  return NextResponse.json(rows)
+  return NextResponse.json(rows, { headers: { 'Cache-Control': 'no-store' } })
 }
